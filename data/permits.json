@@ -1,0 +1,7 @@
+{
+  "fetchedAt": null,
+  "permitCount": 0,
+  "whereClause": "",
+  "permits": [],
+  "_note": "This file is auto-generated nightly by .github/workflows/update-data.yml — do not edit manually"
+}

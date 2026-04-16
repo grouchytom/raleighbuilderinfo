@@ -1,0 +1,1468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raleigh Builder Intelligence</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#fff;--bg2:#f5f5f4;--bg3:#eeedea;
+  --border:rgba(0,0,0,0.1);--border2:rgba(0,0,0,0.2);
+  --text:#1a1a18;--text2:#5f5e5a;--text3:#9c9a92;
+  --blue:#185fa5;--blue-bg:#e6f1fb;--blue-t:#0c447c;
+  --green:#3b6d11;--green-bg:#eaf3de;
+  --amber:#854f0b;--amber-bg:#faeeda;
+  --red:#a32d2d;--red-bg:#fcebeb;
+  --teal:#0f6e56;--teal-bg:#e1f5ee;
+  --r:8px;--rl:12px;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#1c1c1a;--bg2:#252523;--bg3:#2e2e2b;
+  --border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.16);
+  --text:#e8e6df;--text2:#9c9a92;--text3:#6e6c66;
+  --blue:#85b7eb;--blue-bg:#0c447c;--blue-t:#b5d4f4;
+  --green:#97c459;--green-bg:#27500a;
+  --amber:#ef9f27;--amber-bg:#633806;
+  --red:#f09595;--red-bg:#791f1f;
+  --teal:#5dcaa5;--teal-bg:#085041;
+}}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;background:var(--bg3);color:var(--text);min-height:100vh}
+#loading{position:fixed;inset:0;z-index:200;background:var(--bg3);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+#loading h2{font-size:16px;font-weight:500}
+.prog-outer{width:300px;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.prog-inner{height:100%;background:var(--blue);border-radius:2px;transition:width .3s;width:0}
+#prog-msg{font-size:12px;color:var(--text2)}
+header{background:var(--bg);border-bottom:0.5px solid var(--border);padding:0 1.5rem;height:48px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+header h1{font-size:14px;font-weight:500}
+.hdr-meta{font-size:12px;color:var(--text3);margin-left:8px}
+.hdr-btn{font-size:12px;padding:5px 12px;border:0.5px solid var(--border2);border-radius:var(--r);background:none;color:var(--text2);cursor:pointer}
+.hdr-btn:hover{background:var(--bg2)}
+#err{display:none;margin:1rem 1.5rem;padding:12px 16px;background:var(--red-bg);border:0.5px solid var(--red);border-radius:var(--r);font-size:13px;color:var(--red);line-height:1.6}
+main{max-width:1300px;margin:0 auto;padding:1.25rem 1.5rem 4rem}
+.tabs{display:flex;border-bottom:0.5px solid var(--border);margin-bottom:1.25rem}
+.tab{padding:7px 14px;font-size:13px;cursor:pointer;border:none;background:none;color:var(--text2);border-bottom:2px solid transparent;margin-bottom:-0.5px;white-space:nowrap}
+.tab:hover{color:var(--text)}.tab.active{color:var(--text);border-bottom-color:var(--text);font-weight:500}
+.panel{display:none}.panel.active{display:block}
+
+/* Map Search tab */
+#mapx{height:520px}
+
+/* Metrics */
+.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:1.25rem}
+.metric{background:var(--bg2);border-radius:var(--r);padding:.85rem 1rem}
+.metric-lbl{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.metric-val{font-size:22px;font-weight:500}
+.metric-sub{font-size:11px;color:var(--text3);margin-top:2px}
+
+/* Toolbar */
+.toolbar{display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap;align-items:center}
+.toolbar input,.toolbar select{font-size:13px;padding:6px 10px;height:34px;border:0.5px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--text)}
+.toolbar input{flex:1;min-width:150px}
+
+/* Table */
+.card{border:0.5px solid var(--border);border-radius:var(--rl);overflow:hidden;background:var(--bg)}
+table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+th{padding:8px 10px;font-weight:500;font-size:12px;color:var(--text2);border-bottom:0.5px solid var(--border);text-align:left;white-space:nowrap;cursor:pointer;user-select:none}
+th:hover{color:var(--text)}
+th.sort-asc::after{content:' ↑';color:var(--blue)}
+th.sort-desc::after{content:' ↓';color:var(--blue)}
+td{padding:8px 10px;border-bottom:0.5px solid var(--border);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg2)}
+.tfoot{font-size:11px;color:var(--text3);padding:.5rem 1rem;background:var(--bg2);border-top:0.5px solid var(--border)}
+.bname{font-weight:500;color:var(--blue);cursor:pointer}
+.bname:hover{text-decoration:underline}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+.badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:10px;font-weight:500;white-space:nowrap}
+.badge.clickable{cursor:pointer}.badge.clickable:hover{opacity:.8}
+.s-active{background:var(--green-bg);color:var(--green)}
+.s-review{background:var(--amber-bg);color:var(--amber)}
+.s-issued{background:var(--blue-bg);color:var(--blue-t)}
+.s-co{background:var(--teal-bg);color:var(--teal)}
+.s-other{background:var(--bg2);color:var(--text3)}
+.qgood{color:var(--green);font-weight:500}
+.qwarn{color:var(--amber);font-weight:500}
+.qbad{color:var(--red);font-weight:500}
+.prog-track{display:inline-block;width:52px;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;vertical-align:middle;margin-right:5px}
+.prog-fill{height:100%;border-radius:2px;background:var(--blue)}
+
+/* Profile */
+.profile{border:0.5px solid var(--border);border-radius:var(--rl);margin-top:1rem;background:var(--bg);overflow:hidden}
+.profile-head{padding:1rem 1.25rem;border-bottom:0.5px solid var(--border);background:var(--bg2);display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.profile-name{font-size:18px;font-weight:500;margin-bottom:4px}
+.profile-meta{font-size:12px;color:var(--text2);line-height:1.8}
+.profile-body{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.pcol{padding:1rem 1.25rem;border-bottom:0.5px solid var(--border)}
+.pcol:nth-child(odd){border-right:0.5px solid var(--border)}
+.pcol:nth-last-child(-n+2){border-bottom:none}
+.slbl{font-size:11px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.65rem}
+.srow{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:13px;border-bottom:0.5px solid var(--border)}
+.srow:last-child{border-bottom:none}
+.srbl{color:var(--text2)}
+.srv{font-weight:500}
+.insight{font-size:12px;color:var(--text2);margin-top:.6rem;line-height:1.6}
+.links-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.lcard{border:0.5px solid var(--border);border-radius:var(--r);padding:.6rem .85rem;background:var(--bg3)}
+.lcard-t{font-size:12px;font-weight:500;margin-bottom:2px}
+.lcard-d{font-size:11px;color:var(--text3);margin-bottom:5px;line-height:1.4}
+
+/* Projects */
+.proj-section{padding:1rem 1.25rem;border-top:0.5px solid var(--border)}
+.proj-controls{display:flex;justify-content:space-between;align-items:center;margin-bottom:.65rem;gap:8px;flex-wrap:wrap}
+.proj-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:.75rem}
+.proj-card{border:0.5px solid var(--border);border-radius:var(--r);padding:.65rem .85rem;background:var(--bg)}
+.proj-card.flagged{border-left:3px solid var(--red)}
+.proj-card.done{border-left:3px solid var(--teal)}
+.paddr{font-size:13px;font-weight:500;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pid{font-size:11px;margin-bottom:5px}
+.prow{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px;border-bottom:0.5px solid var(--border)}
+.prow:last-child{border-bottom:none}
+.plbl{color:var(--text2)}
+.pval{font-weight:500}
+.pval.muted{color:var(--text3);font-weight:400}
+.pval.good{color:var(--teal)}
+.pval.bad{color:var(--red)}
+.owner-section{margin-top:6px;padding-top:6px;border-top:0.5px solid var(--border);font-size:11px;line-height:1.6}
+.owner-lbl{color:var(--text3);margin-bottom:1px}
+.owner-name{font-weight:500;font-size:12px}
+.pagination{display:flex;gap:5px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text2)}
+.page-btn{padding:4px 9px;border:0.5px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--text2);cursor:pointer;font-size:12px;white-space:nowrap}
+.page-btn:hover:not(:disabled){background:var(--bg2)}
+.page-btn:disabled{opacity:.38;cursor:default}
+
+/* Profile map + chart */
+.profile-map-wrap{border-top:0.5px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:0}
+.profile-map-col{padding:1rem 1.25rem;border-right:0.5px solid var(--border)}
+.profile-chart-col{padding:1rem 1.25rem}
+.pmap{height:240px;border-radius:var(--r);overflow:hidden;border:0.5px solid var(--border)}
+.pchart{height:240px;position:relative}
+/* Back to top */
+#back-to-top{position:fixed;bottom:24px;right:24px;z-index:500;background:var(--blue);color:#fff;border:none;border-radius:999px;padding:8px 16px;font-size:13px;font-weight:500;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.25);display:none;align-items:center;gap:6px}
+#back-to-top:hover{opacity:.88}
+/* Homeowner's Guide */
+.guide-section{display:flex;gap:1rem;padding:1.1rem 0;border-bottom:0.5px solid var(--border);margin-bottom:.1rem}
+.guide-num{flex-shrink:0;width:28px;height:28px;background:var(--blue);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;margin-top:1px}
+.guide-body{flex:1}
+.guide-title{font-size:14px;font-weight:600;margin-bottom:.45rem}
+.guide-text{font-size:13px;color:var(--text2);line-height:1.7}
+.guide-list{font-size:13px;color:var(--text2);line-height:1.7;padding-left:1.25rem;margin-top:.4rem}
+.guide-list li{margin-bottom:.3rem}
+.guide-action{font-size:12px;margin-top:.65rem;padding:.5rem .75rem;background:var(--blue-bg);border-radius:var(--r);border-left:3px solid var(--blue);line-height:1.6;color:var(--text2)}
+.guide-action-lbl{font-weight:600;color:var(--blue-t);margin-right:.35rem}
+.guide-link{display:block;border:0.5px solid var(--border);border-radius:var(--r);padding:.6rem .85rem;background:var(--bg);text-decoration:none}
+.guide-link:hover{background:var(--bg2)}
+.guide-link-t{font-size:12px;font-weight:500;color:var(--blue);margin-bottom:2px}
+.guide-link-d{font-size:11px;color:var(--text3)}
+code{font-family:monospace;background:var(--bg2);padding:1px 5px;border-radius:4px;font-size:12px}
+.close-btn{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text2);line-height:1;padding:0;flex-shrink:0}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <h2>Raleigh Builder Intelligence</h2>
+  <div class="prog-outer"><div class="prog-inner" id="prog"></div></div>
+  <div id="prog-msg">Starting…</div>
+</div>
+<div id="err"></div>
+
+<header>
+  <div style="display:flex;align-items:center">
+    <h1>Raleigh Builder Intelligence</h1>
+    <span class="hdr-meta" id="hdr-meta"></span>
+  </div>
+  <button class="hdr-btn" onclick="boot()">Refresh data</button>
+</header>
+
+<main>
+  <div class="tabs">
+    <button class="tab active" onclick="goTab('dashboard',this)">Builder Search</button>
+    <button class="tab" onclick="goTab('mapsearch',this);initMapTab()">Map Search</button>
+    <button class="tab" onclick="goTab('guide',this)">Homeowner's Guide</button>
+    <button class="tab" onclick="goTab('debug',this)">Debug</button>
+  </div>
+
+  <!-- BUILDER SEARCH -->
+  <div id="tab-dashboard" class="panel active">
+    <div class="metrics">
+      <div class="metric"><div class="metric-lbl">Builders</div><div class="metric-val" id="m-b">—</div><div class="metric-sub">2020–present</div></div>
+      <div class="metric"><div class="metric-lbl">Permits</div><div class="metric-val" id="m-p">—</div><div class="metric-sub">new residential</div></div>
+      <div class="metric"><div class="metric-lbl">Avg. build time</div><div class="metric-val" id="m-bt">—</div><div class="metric-sub">applied → finalized</div></div>
+      <div class="metric"><div class="metric-lbl">Completed</div><div class="metric-val" id="m-co">—</div><div class="metric-sub">Permit Finaled</div></div>
+      <div class="metric"><div class="metric-lbl">Quality flags</div><div class="metric-val" id="m-qf">—</div><div class="metric-sub">stalled or slow builds</div></div>
+    </div>
+
+    <!-- Filters (drive both map + table) -->
+    <div class="toolbar">
+      <div style="flex:1;min-width:150px;position:relative;display:flex;align-items:center">
+        <input type="text" id="q" placeholder="Search builder or address (e.g. 228 Georgetown)…"
+          oninput="onFilterChange();updateClear()" style="width:100%;padding-right:28px">
+        <button id="clear-btn" onclick="clearSearch()"
+          style="display:none;position:absolute;right:6px;background:none;border:none;font-size:16px;cursor:pointer;color:var(--text3);line-height:1;padding:0" title="Clear">×</button>
+      </div>
+      <select id="f-status" onchange="onFilterChange()"><option value="">All statuses</option></select>
+      <select id="f-area"   onchange="onFilterChange()"><option value="">All areas</option></select>
+      <select id="f-zip"    onchange="onFilterChange()"><option value="">All zip codes</option></select>
+    </div>
+    <div id="search-hint" style="display:none;font-size:12px;color:var(--text2);margin-bottom:.65rem;padding:6px 10px;background:var(--blue-bg);border-radius:var(--r);border:0.5px solid var(--blue)">
+      Searching by address — showing builder(s) who pulled permits at this location.
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th style="width:26px">#</th>
+          <th style="width:190px" data-col="name"            onclick="sortBy('name',this)">Builder</th>
+          <th style="width:60px"  data-col="projects"        onclick="sortBy('projects',this)">Permits</th>
+          <th style="width:52px"  data-col="active"          onclick="sortBy('active',this)">Active</th>
+          <th style="width:68px"  data-col="completed"       onclick="sortBy('completed',this)">Done</th>
+          <th style="width:88px"  data-col="avgBuildDays"    onclick="sortBy('avgBuildDays',this)">Build time</th>
+          <th style="width:84px"  data-col="avgValue"        onclick="sortBy('avgValue',this)">Avg. value</th>
+          <th style="width:76px"  data-col="qualityFlagRate" onclick="sortBy('qualityFlagRate',this)">Quality</th>
+          <th data-col="areas">Area</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="tfoot" id="tfoot">Loading…</div>
+    </div>
+    <div id="profile-wrap"></div>
+  </div>
+
+  <!-- BUYER'S GUIDE -->
+  <!-- MAP SEARCH -->
+  <div id="tab-mapsearch" class="panel">
+
+    <!-- Map controls row -->
+    <div style="display:flex;gap:8px;margin-bottom:.75rem;flex-wrap:wrap;align-items:center">
+      <!-- Search -->
+      <div style="position:relative;display:flex;align-items:center;flex:1;min-width:180px">
+        <input type="text" id="mq" placeholder="Builder or address…"
+          oninput="onMapFilterChange()" style="width:100%;font-size:13px;padding:6px 10px;height:34px;border:0.5px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--text);padding-right:28px">
+        <button onclick="document.getElementById('mq').value='';onMapFilterChange()"
+          style="position:absolute;right:6px;background:none;border:none;font-size:16px;cursor:pointer;color:var(--text3);line-height:1;padding:0">×</button>
+      </div>
+      <!-- Status -->
+      <select id="mf-status" onchange="onMapFilterChange()" style="font-size:13px;padding:6px 10px;height:34px;border:0.5px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--text)">
+        <option value="">All statuses</option>
+      </select>
+      <!-- Color mode -->
+      <select id="mf-color" onchange="onMapFilterChange()" style="font-size:13px;padding:6px 10px;height:34px;border:0.5px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--text)">
+        <option value="status">Color by status</option>
+        <option value="builder">Color by builder</option>
+        <option value="value">Color by permit value</option>
+        <option value="buildtime">Color by build time</option>
+      </select>
+      <!-- Year filter -->
+      <select id="mf-year" onchange="onMapFilterChange()" style="font-size:13px;padding:6px 10px;height:34px;border:0.5px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--text)">
+        <option value="">All years</option>
+        <option value="2020">2020</option>
+        <option value="2021">2021</option>
+        <option value="2022">2022</option>
+        <option value="2023">2023</option>
+        <option value="2024">2024</option>
+        <option value="2025">2025</option>
+      </select>
+      <span id="map-count" style="font-size:12px;color:var(--text3);white-space:nowrap"></span>
+    </div>
+
+    <!-- Map -->
+    <div style="position:relative;border:0.5px solid var(--border);border-radius:var(--rl);overflow:hidden;margin-bottom:1rem">
+      <div id="mapx" style="height:520px"></div>
+      <!-- Legend -->
+      <div id="map-legend" style="position:absolute;bottom:24px;right:8px;z-index:1000;background:rgba(255,255,255,.93);backdrop-filter:blur(4px);padding:8px 10px;border-radius:var(--r);border:0.5px solid var(--border);font-size:11px;line-height:1.9;min-width:140px"></div>
+    </div>
+
+    <!-- Live stats for visible permits -->
+    <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:1rem">
+      <div class="metric"><div class="metric-lbl">Permits shown</div><div class="metric-val" id="mx-p">—</div></div>
+      <div class="metric"><div class="metric-lbl">Builders</div><div class="metric-val" id="mx-b">—</div></div>
+      <div class="metric"><div class="metric-lbl">Avg. value</div><div class="metric-val" id="mx-v">—</div></div>
+      <div class="metric"><div class="metric-lbl">Avg. build time</div><div class="metric-val" id="mx-bt">—</div></div>
+      <div class="metric"><div class="metric-lbl">Completed</div><div class="metric-val" id="mx-co">—</div></div>
+    </div>
+
+    <!-- Builders in current view (scrollable) -->
+    <div class="card" id="mx-builders-card" style="display:none">
+      <table style="table-layout:fixed;width:100%">
+        <thead><tr>
+          <th style="width:26px">#</th>
+          <th>Builder</th>
+          <th style="width:64px">Permits</th>
+          <th style="width:68px">Done</th>
+          <th style="width:96px">Avg. value</th>
+          <th style="width:96px">Build time</th>
+        </tr></thead>
+      </table>
+      <div style="max-height:360px;overflow-y:auto">
+        <table style="table-layout:fixed;width:100%">
+          <colgroup>
+            <col style="width:26px"><col><col style="width:64px">
+            <col style="width:68px"><col style="width:96px"><col style="width:96px">
+          </colgroup>
+          <tbody id="mx-tbody"></tbody>
+        </table>
+      </div>
+      <div class="tfoot" id="mx-tfoot"></div>
+    </div>
+    <div id="mx-profile-wrap"></div>
+  </div>
+
+  <div id="tab-guide" class="panel">
+    <div style="max-width:820px">
+
+      <div style="margin-bottom:1.5rem">
+        <h2 style="font-size:16px;font-weight:600;margin-bottom:.35rem">Homeowner's Guide to choosing a builder in Raleigh</h2>
+        <p style="font-size:13px;color:var(--text2);line-height:1.7">
+          Building a home is likely the largest financial commitment you'll make.
+          This guide walks through what to check before signing a contract — and how to use this dashboard at each step.
+          North Carolina has specific licensing requirements that give you meaningful tools to protect yourself.
+        </p>
+      </div>
+
+      <!-- Step 1 -->
+      <div class="guide-section">
+        <div class="guide-num">1</div>
+        <div class="guide-body">
+          <div class="guide-title">Verify the license — before anything else</div>
+          <div class="guide-text">
+            In North Carolina, any contractor working on a project over $40,000 is legally required to hold a license from the
+            NC Licensing Board for General Contractors. An unlicensed builder exposes you to serious financial and legal risk —
+            if something goes wrong, you have no recourse and you may be liable for injuries on your own property.
+          </div>
+          <div class="guide-text" style="margin-top:.5rem">
+            Look for the <strong>Accredited Builder</strong> or <strong>Accredited Master Builder</strong> designation from the
+            NC Builder Institute — these signal ongoing education and commitment to professional standards.
+            Licensed contractors are also required to carry general liability insurance and complete at least 8 hours of
+            continuing education per year to renew.
+          </div>
+          <div class="guide-action">
+            <span class="guide-action-lbl">In this dashboard:</span>
+            Search the builder → open their profile → click <strong>NC License Board</strong> to verify their license status and check for complaints.
+            The license number is shown in the profile header if the permit data includes it.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="guide-section">
+        <div class="guide-num">2</div>
+        <div class="guide-body">
+          <div class="guide-title">Look at their track record in the permit data</div>
+          <div class="guide-text">
+            The permit record is an unfiltered history of every home a builder has started in Raleigh since 2020.
+            Unlike reviews, it can't be curated. Key things to look for:
+          </div>
+          <ul class="guide-list">
+            <li><strong>Completion rate</strong> — what share of their permitted homes reach "Permit Finaled" status? A builder with many stalled or expired permits is a concern.</li>
+            <li><strong>Avg. build time</strong> — Raleigh new construction typically runs 8–14 months. Builders consistently over 19 months warrant a conversation about why.</li>
+            <li><strong>Volume of work</strong> — a builder with 50+ active permits may be stretched thin. A builder with only 1–2 may lack experience. Neither is disqualifying, but both are worth asking about.</li>
+            <li><strong>Quality flags</strong> — stalled permits (issued over a year ago with no completion) may indicate financial trouble, permitting issues, or over-commitment.</li>
+          </ul>
+          <div class="guide-action">
+            <span class="guide-action-lbl">In this dashboard:</span>
+            Use the <strong>Build time</strong> and <strong>Done</strong> columns in the table. Sort by <strong>Quality</strong> to surface builders with flags.
+            Click any builder to see their full project history with individual permit links.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="guide-section">
+        <div class="guide-num">3</div>
+        <div class="guide-body">
+          <div class="guide-title">Check inspection history for each permit</div>
+          <div class="guide-text">
+            Inspection records reveal whether a builder's work consistently meets code on the first attempt.
+            Repeated failed inspections — especially on the same type of work (framing, electrical, plumbing) — suggest
+            systemic quality problems, not just bad luck. Local building inspectors see every builder's work regularly
+            and can tell you which contractors routinely fail before meeting code.
+          </div>
+          <div class="guide-text" style="margin-top:.5rem">
+            <strong>What to look for:</strong> a high ratio of re-inspections to total inspections is a red flag.
+            One or two failed inspections on a large custom build is normal. Five or more on a standard production home is not.
+          </div>
+          <div class="guide-action">
+            <span class="guide-action-lbl">In this dashboard:</span>
+            Click any permit number in a builder's project list. The Raleigh permit portal opens to that permit —
+            click the <strong>Inspections</strong> tab to see the full pass/fail history. No login required.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="guide-section">
+        <div class="guide-num">4</div>
+        <div class="guide-body">
+          <div class="guide-title">Search for legal issues, liens, and court cases</div>
+          <div class="guide-text">
+            Mechanics liens are filed when subcontractors or suppliers aren't paid — if a builder has multiple liens,
+            it may signal cash flow problems that could affect your project mid-build. Civil court cases may reveal
+            disputes with previous clients. Neither is automatically disqualifying, but patterns matter.
+          </div>
+          <div class="guide-text" style="margin-top:.5rem">
+            Also check the NC Secretary of State to confirm the business is in good standing —
+            a dissolved or administratively revoked entity is a significant warning sign.
+          </div>
+          <div class="guide-action">
+            <span class="guide-action-lbl">In this dashboard:</span>
+            In the builder profile → <strong>Verify this builder</strong> → use the <strong>NC Courts &amp; Liens</strong>,
+            <strong>NC Secretary of State</strong>, and <strong>NC License Board</strong> links.
+            Search by the exact company name shown in the profile.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5 -->
+      <div class="guide-section">
+        <div class="guide-num">5</div>
+        <div class="guide-body">
+          <div class="guide-title">Talk to owners of recently completed homes</div>
+          <div class="guide-text">
+            No data source replaces a direct conversation with someone who has lived in a home the builder built.
+            Ask specifically: Did they hit the timeline? How did they handle problems? Would you hire them again?
+            A good builder will proactively offer references. Be cautious of any builder who hesitates.
+          </div>
+          <div class="guide-text" style="margin-top:.5rem">
+            The Raleigh area has an active homeowner community — the
+            <a href="https://www.raleigh-wake.org" target="_blank" rel="noopener">Raleigh-Wake County Home Builders Association</a>
+            is the second largest HBA in the country and a good resource for finding vetted builders and understanding
+            industry norms.
+          </div>
+          <div class="guide-action">
+            <span class="guide-action-lbl">In this dashboard:</span>
+            Find a completed project in a builder's profile → click <strong>Current owner (Wake Co.) →</strong>
+            to open the Wake County property record. The current owner's name and mailing address are public record —
+            you can reach out directly to ask about their experience.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 6 -->
+      <div class="guide-section">
+        <div class="guide-num">6</div>
+        <div class="guide-body">
+          <div class="guide-title">Red flags to walk away from</div>
+          <ul class="guide-list">
+            <li><strong>Asks you to pull the permits yourself</strong> — this is a sign the builder may not be licensed. Licensed builders pull their own permits.</li>
+            <li><strong>Requests large upfront payments</strong> — a reasonable payment schedule ties payments to construction milestones, not calendar dates.</li>
+            <li><strong>No written contract or vague scope</strong> — every detail should be in writing: materials, timeline, payment schedule, change order process, and warranty terms.</li>
+            <li><strong>Pressures you to sign quickly</strong> — reputable builders stay busy and don't need to rush you. Pressure to decide is a sales tactic, not a sign of quality.</li>
+            <li><strong>Can't provide references</strong> — any builder with a real track record will have happy clients willing to talk.</li>
+            <li><strong>No insurance documentation</strong> — ask for a certificate of insurance before signing. Verify it directly with the insurer.</li>
+            <li><strong>Unusually low bid</strong> — if one estimate is significantly below the others, find out why. It often means cut corners on materials, unlicensed subcontractors, or a builder who will come back for change orders.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Step 7 -->
+      <div class="guide-section" style="border-bottom:none;margin-bottom:0;padding-bottom:0">
+        <div class="guide-num">7</div>
+        <div class="guide-body">
+          <div class="guide-title">Useful North Carolina resources</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:.5rem">
+            <a class="guide-link" href="https://portal.nclbgc.org/Public/Search" target="_blank" rel="noopener">
+              <div class="guide-link-t">NC License Board</div>
+              <div class="guide-link-d">Verify contractor licenses, check complaints</div>
+            </a>
+            <a class="guide-link" href="https://www.sosnc.gov/online_services/search/by_title/_Business_RegistrationNorth%20Carolina" target="_blank" rel="noopener">
+              <div class="guide-link-t">NC Secretary of State</div>
+              <div class="guide-link-d">Confirm business registration &amp; standing</div>
+            </a>
+            <a class="guide-link" href="https://portal-nc.tylertech.cloud/Portal/Home/Dashboard/29" target="_blank" rel="noopener">
+              <div class="guide-link-t">NC Courts &amp; Liens</div>
+              <div class="guide-link-d">Search civil cases and mechanics liens</div>
+            </a>
+            <a class="guide-link" href="https://raleighnc-energovpub.tylerhost.net/apps/selfservice#/search" target="_blank" rel="noopener">
+              <div class="guide-link-t">Raleigh Permit Portal</div>
+              <div class="guide-link-d">Full inspection history for any permit</div>
+            </a>
+            <a class="guide-link" href="https://ncdoj.gov/protecting-consumers/home-repair-and-products/home-improvement/" target="_blank" rel="noopener">
+              <div class="guide-link-t">NC Attorney General</div>
+              <div class="guide-link-d">Consumer protection &amp; contractor complaint line</div>
+            </a>
+            <a class="guide-link" href="https://www.raleigh-wake.org" target="_blank" rel="noopener">
+              <div class="guide-link-t">Raleigh-Wake HBA</div>
+              <div class="guide-link-d">Find member builders, industry standards</div>
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- DEBUG -->
+  <div id="tab-debug" class="panel">
+    <p style="font-size:13px;color:var(--text2);margin-bottom:.75rem">
+      Open console (F12) → run <code>probeFields()</code> or <code>window._permits.find(p=>p.permitnum==='BLDR-XXXXXX-XXXX')</code>
+    </p>
+    <div id="debug-info" style="font-size:13px;color:var(--text2);line-height:2"></div>
+  </div>
+</main>
+
+<button id="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑ Top</button>
+
+<script type="module">
+import {
+  loadDashboardData, loadFromCacheOrLive, aggregateBuilders, filterBuilders, probeFields,
+  permitPortalURL, wakePropertyURL, ncLicenseURL, ncSOSURL, ncCourtsURL,
+} from './raleigh-permits-api.js';
+
+window.probeFields = probeFields;
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let allPermits = [], allBuilders = [], loadStats = {};
+// Single-column sort state
+let sortCol = 'projects', sortDir = 'desc';
+let leafletMap = null, markerLayer = null, mapTabInited = false;
+let profilePage = 0;
+const PAGE_SZ = 12;
+const hiddenStatuses = new Set(); // tracks which legend items are toggled off
+
+// Builder → color mapping for map markers
+const PALETTE = ['#185fa5','#3b6d11','#854f0b','#a32d2d','#0f6e56',
+                 '#6b3fa0','#b05a00','#1a7a8a','#7a3f6e','#3a5f2a'];
+const colorMap = {};
+function builderColor(name) {
+  if (!colorMap[name]) colorMap[name] = PALETTE[Object.keys(colorMap).length % PALETTE.length];
+  return colorMap[name];
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+window.boot = async function() {
+  document.getElementById('loading').style.display = 'flex';
+  document.getElementById('err').style.display = 'none';
+  document.getElementById('prog').style.width = '0';
+  const t0 = Date.now();
+  try {
+    const { permits, builders, fromCache, cachedAt } =
+      await loadFromCacheOrLive({ onProgress: onProg });
+    allPermits = permits; allBuilders = builders;
+    window._permits = permits; window._builders = builders;
+    loadStats = { permits: permits.length, builders: builders.length, ms: Date.now()-t0, fromCache, cachedAt };
+    populateFilters();
+    buildDebugTab();
+    onFilterChange();
+    const cacheNote = fromCache && cachedAt
+      ? ` · data from ${new Date(cachedAt).toLocaleDateString('en-US',{month:'short',day:'numeric'})}`
+      : '';
+    document.getElementById('hdr-meta').textContent =
+      `${permits.length.toLocaleString()} permits · ${builders.length} builders · 2020–present${cacheNote}`;
+  } catch(e) { showErr(e); }
+  finally { document.getElementById('loading').style.display = 'none'; }
+};
+
+function onProg({ message, pct }) {
+  document.getElementById('prog-msg').textContent = message||'';
+  if (pct!=null) document.getElementById('prog').style.width=`${Math.round(pct*100)}%`;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+const mean = arr => arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : 0;
+const fmtK = v => v ? '$'+Math.round(v/1000).toLocaleString()+'k' : '—';
+const fmtDays = d => !d?'—':d>=365?(d/365).toFixed(1)+'y':d+'d';
+const fmtDate = ms => ms?new Date(ms).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}):null;
+const fmtMo   = ms => ms?new Date(ms).toLocaleDateString('en-US',{year:'numeric',month:'short'}):null;
+const esc = s => (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
+const qClass = r => r===0?'qgood':r<=15?'qwarn':'qbad';
+
+function sBadge(s, clickable=false) {
+  if (!s) return `<span class="badge s-other">—</span>`;
+  const cls = s==='Complete'||s.includes('Finaled')?'s-co'
+    : s.includes('Active')||s==='Inspections In Progress'?'s-active'
+    : s.includes('Review')||s.includes('Pending')||s==='In Review'?'s-review'
+    : (s.includes('Issued')&&!s.includes('CO'))?'s-issued':'s-other';
+  const click = clickable?` clickable" onclick="filterByStatus('${esc(s)}')" title="Filter to: ${s}`:'';
+  return `<span class="badge ${cls}${click}">${s}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// Filters — single source of truth driving BOTH map and table
+// ---------------------------------------------------------------------------
+function populateFilters() {
+  const statuses = [...new Set(allPermits.map(p=>p.statuscurrent).filter(Boolean))].sort();
+  const areas    = [...new Set(allPermits.map(p=>p.area).filter(Boolean))].sort();
+  const zips     = [...new Set(allPermits.map(p=>p.zip5).filter(Boolean))].sort();
+  fill('f-status', statuses, 'All statuses');
+  fill('f-area',   areas,    'All areas');
+  fill('f-zip',    zips,     'All zip codes');
+}
+function fill(id, vals, ph) {
+  document.getElementById(id).innerHTML =
+    `<option value="">${ph}</option>`+vals.map(v=>`<option value="${v}">${v}</option>`).join('');
+}
+
+function getFilterValues() {
+  return {
+    search: document.getElementById('q').value,
+    status: document.getElementById('f-status').value,
+    area:   document.getElementById('f-area').value,
+    zip:    document.getElementById('f-zip').value,
+  };
+}
+
+// Get filtered permits (used for map)
+function getFilteredPermits() {
+  const { search, status, area, zip } = getFilterValues();
+  const q = search.toLowerCase().trim();
+  const isAddr    = q && /^\d/.test(q);
+  const isBuilder = q && !isAddr;
+
+  return allPermits.filter(p => {
+    if (area   && p.area             !== area)  return false;
+    if (zip    && String(p.zip5||'') !== zip)   return false;
+    if (status && p.statuscurrent    !== status) return false;
+    if (isAddr    && !(p.originaladdress1||'').toLowerCase().includes(q))    return false;
+    if (isBuilder && !(p.contractorcompanyname||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+// Get filtered+sorted builders (used for table)
+function getFilteredBuilders() {
+  const { search, status, area, zip } = getFilterValues();
+  let builders = filterBuilders(allPermits, { area, zip, status, search });
+
+  if (sortCol === 'avgBuildDays') {
+    builders = builders.filter(b => b.avgBuildDays != null);
+  }
+  builders.sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+  return builders;
+}
+
+// Main filter handler — updates everything
+window.onFilterChange = function() {
+  if (!allPermits.length) return;
+  const builders = getFilteredBuilders();
+  renderMetrics(builders);
+  renderTable(builders);
+  updateSortHeaders();
+};
+
+window.filterByStatus = function(status) {
+  document.getElementById('f-status').value = status;
+  onFilterChange();
+};
+window.updateClear = function() {
+  const q = document.getElementById('q').value;
+  document.getElementById('clear-btn').style.display = q?'block':'none';
+  document.getElementById('search-hint').style.display = (q&&/^\d/.test(q))?'block':'none';
+};
+window.clearSearch = function() {
+  document.getElementById('q').value='';
+  document.getElementById('clear-btn').style.display='none';
+  document.getElementById('search-hint').style.display='none';
+  onFilterChange();
+};
+
+// ---------------------------------------------------------------------------
+// Sort
+// ---------------------------------------------------------------------------
+window.sortBy = function(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+  } else {
+    sortCol = col;
+    sortDir = col === 'name' ? 'asc' : 'desc';
+  }
+  updateSortHeaders();
+  const builders = getFilteredBuilders();
+  renderMetrics(builders);
+  renderTable(builders);
+};
+
+window.clearSort = function() {
+  sortCol = 'projects';
+  sortDir = 'desc';
+  updateSortHeaders();
+  const builders = getFilteredBuilders();
+  renderMetrics(builders);
+  renderTable(builders);
+};
+
+function updateSortHeaders() {
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.col === sortCol) {
+      th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Map
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Map Search tab
+// ---------------------------------------------------------------------------
+
+const STATUS_COLORS = {
+  'Complete':'#0f6e56', 'Permit Finaled':'#0f6e56',
+  'Active':'#185fa5', 'Issued':'#185fa5', 'Permit Issued':'#185fa5',
+  'In Review':'#854f0b', 'Under Review':'#854f0b', 'Pending':'#854f0b',
+  'Inspections In Progress':'#6b3fa0',
+  'Expired':'#9c9a92', 'Withdrawn':'#9c9a92',
+};
+const STATUS_LEGEND = [
+  ['#0f6e56','Completed'],['#185fa5','Active / Issued'],
+  ['#854f0b','In Review'],['#6b3fa0','Inspections'],['#9c9a92','Other'],
+];
+
+function valueColor(cost) {
+  if (!cost) return '#9c9a92';
+  if (cost < 300000) return '#3b6d11';
+  if (cost < 600000) return '#185fa5';
+  if (cost < 1000000) return '#854f0b';
+  return '#a32d2d';
+}
+const VALUE_LEGEND = [
+  ['#3b6d11','< $300k'],['#185fa5','$300k–$600k'],
+  ['#854f0b','$600k–$1M'],['#a32d2d','> $1M'],['#9c9a92','No data'],
+];
+
+function buildTimeColor(days) {
+  if (!days) return '#9c9a92';
+  const mo = days / 30.4;
+  if (mo <= 9)  return '#3b6d11';
+  if (mo <= 14) return '#185fa5';
+  if (mo <= 19) return '#854f0b';
+  return '#a32d2d';
+}
+const BUILDTIME_LEGEND = [
+  ['#3b6d11','≤ 9 months'],['#185fa5','9–14 months'],
+  ['#854f0b','14–19 months'],['#a32d2d','> 19 months'],['#9c9a92','No data'],
+];
+
+function getMapFilteredPermits() {
+  const q      = (document.getElementById('mq')?.value||'').toLowerCase().trim();
+  const status = document.getElementById('mf-status')?.value||'';
+  const year   = document.getElementById('mf-year')?.value||'';
+  const isAddr = q && /^\d/.test(q);
+
+  return allPermits.filter(p => {
+    if (status && p.statuscurrent !== status) return false;
+    if (year && p.applieddate) {
+      if (new Date(p.applieddate).getFullYear() !== Number(year)) return false;
+    }
+    if (isAddr && !(p.originaladdress1||'').toLowerCase().includes(q)) return false;
+    if (!isAddr && q && !(p.contractorcompanyname||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+window.initMapTab = function() {
+  if (mapTabInited && leafletMap) {
+    setTimeout(() => leafletMap.invalidateSize(), 50);
+    return;
+  }
+  if (!allPermits.length) { setTimeout(initMapTab, 300); return; }
+
+  // Populate status filter
+  const statuses = [...new Set(allPermits.map(p=>p.statuscurrent).filter(Boolean))].sort();
+  const mfStatus = document.getElementById('mf-status');
+  if (mfStatus) {
+    mfStatus.innerHTML = '<option value="">All statuses</option>' +
+      statuses.map(s=>`<option value="${s}">${s}</option>`).join('');
+  }
+
+  leafletMap = L.map('mapx').setView([35.79,-78.65],11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'© OpenStreetMap contributors', maxZoom:19,
+  }).addTo(leafletMap);
+  markerLayer = L.layerGroup().addTo(leafletMap);
+  mapTabInited = true;
+  onMapFilterChange();
+};
+
+window.toggleLegendItem = function(label) {
+  if (hiddenStatuses.has(label)) hiddenStatuses.delete(label);
+  else hiddenStatuses.add(label);
+  onMapFilterChange();
+};
+
+window.onMapFilterChange = function() {
+  if (!mapTabInited || !leafletMap || !markerLayer) return;
+  markerLayer.clearLayers();
+
+  const permits    = getMapFilteredPermits();
+  const colorMode  = document.getElementById('mf-color')?.value || 'status';
+
+  // Determine which legend items are active for this color mode
+  // hiddenStatuses only applies in status mode — other modes always show all
+  const getColor = p => {
+    if      (colorMode==='builder')   return builderColor(p.contractorcompanyname||'Unknown');
+    else if (colorMode==='value')     return valueColor(p.estprojectcost);
+    else if (colorMode==='buildtime') return buildTimeColor(p.buildDays);
+    else return STATUS_COLORS[p.statuscurrentmapped] || STATUS_COLORS[p.statuscurrent] || '#9c9a92';
+  };
+
+  // Map each permit's color to its legend label (for filtering)
+  const colorToLabel = c => {
+    if (colorMode === 'status') {
+      return STATUS_LEGEND.find(([lc])=>lc===c)?.[1] || 'Other';
+    }
+    if (colorMode === 'value') {
+      return VALUE_LEGEND.find(([lc])=>lc===c)?.[1] || 'Other';
+    }
+    if (colorMode === 'buildtime') {
+      return BUILDTIME_LEGEND.find(([lc])=>lc===c)?.[1] || 'Other';
+    }
+    return null; // builder mode — no filtering
+  };
+
+  const withCoords = permits.filter(p => {
+    if (!p.latitude_perm || !p.longitude_perm || p.latitude_perm===0) return false;
+    // Apply legend filter for non-builder modes
+    if (hiddenStatuses.size > 0 && colorMode !== 'builder') {
+      const label = colorToLabel(getColor(p));
+      if (label && hiddenStatuses.has(label)) return false;
+    }
+    return true;
+  });
+
+  const MAX = 5000;
+  const sample = withCoords.length > MAX
+    ? [...withCoords].sort(()=>Math.random()-.5).slice(0, MAX)
+    : withCoords;
+
+  for (const p of sample) {
+    const color = getColor(p);
+    const mk = L.circleMarker([p.latitude_perm, p.longitude_perm],{
+      radius:5, fillColor:color, color:'#fff', weight:1, opacity:1, fillOpacity:0.82,
+    });
+    const buildTimeStr = p.buildDays ? fmtDays(p.buildDays) : '—';
+    mk.bindPopup(`
+      <div style="font-size:13px;font-weight:500;margin-bottom:3px">${p.originaladdress1||'No address'}</div>
+      <div style="font-size:12px;margin-bottom:2px">
+        <a href="#" onclick="event.preventDefault();openMapProfile('${(p.contractorcompanyname||'').replace(/'/g,"\\'")}');" style="font-weight:500">${p.contractorcompanyname||'Unknown builder'}</a>
+      </div>
+      <div style="font-size:11px;color:#666;margin-bottom:3px">${p.statuscurrent||''} · ${p.area||''} · ${p.zip5||''}</div>
+      ${p.estprojectcost?`<div style="font-size:11px;margin-bottom:2px">Value: <strong>${fmtK(p.estprojectcost)}</strong></div>`:''}
+      ${p.buildDays?`<div style="font-size:11px;margin-bottom:2px">Build time: <strong>${buildTimeStr}</strong></div>`:''}
+      ${p.applieddate?`<div style="font-size:11px;margin-bottom:4px">Applied: ${fmtMo(p.applieddate)}</div>`:''}
+      <a href="${permitPortalURL(p.permitnum)}" target="_blank" style="font-size:11px">${p.permitnum} →</a>
+    `,{maxWidth:240});
+    markerLayer.addLayer(mk);
+  }
+
+  // Auto-fit
+  const q = (document.getElementById('mq')?.value||'').trim();
+  const status = document.getElementById('mf-status')?.value||'';
+  const year   = document.getElementById('mf-year')?.value||'';
+  if ((q||status||year) && sample.length > 0 && sample.length < 800) {
+    const bounds = L.latLngBounds(sample.map(p=>[p.latitude_perm,p.longitude_perm]));
+    leafletMap.fitBounds(bounds,{padding:[30,30],maxZoom:14});
+  }
+
+  // Update legend — clickable chips in status/value/buildtime modes
+  const legendEl = document.getElementById('map-legend');
+  if (legendEl) {
+    if (colorMode === 'builder') {
+      legendEl.innerHTML = `<div style="color:#666;font-style:italic;font-size:11px">Color = builder<br><span style="font-size:10px">up to 10 colors</span></div>`;
+    } else {
+      const items = colorMode==='value' ? VALUE_LEGEND
+                  : colorMode==='buildtime' ? BUILDTIME_LEGEND
+                  : STATUS_LEGEND;
+      legendEl.innerHTML = `<div style="font-size:10px;color:#888;margin-bottom:4px;font-weight:500">CLICK TO TOGGLE</div>` +
+        items.map(([c,l]) => {
+          const hidden = hiddenStatuses.has(l);
+          return `<div onclick="toggleLegendItem('${l.replace(/'/g,"\\'")}');event.stopPropagation()"
+            style="cursor:pointer;padding:1px 0;display:flex;align-items:center;gap:6px;opacity:${hidden?'0.35':'1'};transition:opacity .15s">
+            <span style="display:inline-block;width:10px;height:10px;flex-shrink:0;border-radius:50%;background:${c};${hidden?'filter:grayscale(1)':''}"></span>
+            <span style="${hidden?'text-decoration:line-through;color:#999':'color:#333'}">${l}</span>
+          </div>`;
+        }).join('');
+    }
+  }
+
+  const count = document.getElementById('map-count');
+  if (count) count.textContent = `${sample.length.toLocaleString()} of ${withCoords.length.toLocaleString()} permits mapped${withCoords.length>MAX?' (sampled)':''}`;
+
+  updateMapStats(permits);
+};
+
+// Reset hiddenStatuses when color mode changes
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('mf-color')?.addEventListener('change', () => {
+    hiddenStatuses.clear();
+  });
+});
+
+function updateMapStats(permits) {
+  document.getElementById('mx-p').textContent = permits.length.toLocaleString();
+  const builders = new Set(permits.map(p=>p.contractorcompanyname).filter(Boolean));
+  document.getElementById('mx-b').textContent = builders.size;
+  const vals = permits.filter(p=>p.estprojectcost).map(p=>p.estprojectcost);
+  document.getElementById('mx-v').textContent = vals.length ? fmtK(mean(vals)) : '—';
+  const bts = permits.filter(p=>p.buildDays).map(p=>p.buildDays);
+  document.getElementById('mx-bt').textContent = bts.length ? fmtDays(Math.round(mean(bts))) : '—';
+  document.getElementById('mx-co').textContent = permits.filter(p=>p.isCompleted).length.toLocaleString();
+
+  // All builders in view, sorted by count — scrollable table shows all
+  const bmap = {};
+  for (const p of permits) {
+    const n = p.contractorcompanyname||'Unknown';
+    if (!bmap[n]) bmap[n]={name:n,count:0,done:0,vals:[],bts:[]};
+    bmap[n].count++;
+    if (p.isCompleted) bmap[n].done++;
+    if (p.estprojectcost) bmap[n].vals.push(p.estprojectcost);
+    if (p.buildDays) bmap[n].bts.push(p.buildDays);
+  }
+  const all = Object.values(bmap).sort((a,b)=>b.count-a.count);
+  const card = document.getElementById('mx-builders-card');
+  const tbody = document.getElementById('mx-tbody');
+  const tfoot = document.getElementById('mx-tfoot');
+  if (!all.length) { card.style.display='none'; return; }
+  card.style.display='';
+  tbody.innerHTML = all.map((b,i)=>`<tr>
+    <td style="color:var(--text3);font-size:11px">${i+1}</td>
+    <td><span class="bname" onclick="openMapProfile('${esc(b.name)}')">${b.name}</span></td>
+    <td>${b.count}</td>
+    <td>${b.done}</td>
+    <td>${b.vals.length?fmtK(mean(b.vals)):'—'}</td>
+    <td>${b.bts.length?fmtDays(Math.round(mean(b.bts))):'—'}</td>
+  </tr>`).join('');
+  tfoot.textContent = `${all.length} builders in current view · ${permits.length.toLocaleString()} permits · scroll to see all`;
+}
+
+// ---------------------------------------------------------------------------
+// Render metrics
+// ---------------------------------------------------------------------------
+function renderMetrics(builders) {
+  const permits = builders.flatMap(b=>b.permits);
+  document.getElementById('m-b').textContent = builders.length;
+  document.getElementById('m-p').textContent = permits.length.toLocaleString();
+  const bt = builders.filter(b=>b.avgBuildDays).map(b=>b.avgBuildDays);
+  document.getElementById('m-bt').textContent = bt.length?fmtDays(Math.round(mean(bt))):'—';
+  document.getElementById('m-co').textContent = permits.filter(p=>p.isCompleted).length.toLocaleString();
+  const flagged = permits.filter(p=>p.isQualityFlag).length;
+  const rate = permits.length?Math.round(flagged/permits.length*100):0;
+  const mq = document.getElementById('m-qf');
+  mq.textContent = `${flagged.toLocaleString()} (${rate}%)`;
+  mq.className = 'metric-val '+qClass(rate);
+}
+
+// ---------------------------------------------------------------------------
+// Render table
+// ---------------------------------------------------------------------------
+function renderTable(builders) {
+  const tbody = document.getElementById('tbody');
+  if (!builders.length) {
+    tbody.innerHTML='<tr><td colspan="9" style="padding:2rem;text-align:center;color:var(--text3)">No results.</td></tr>';
+    document.getElementById('tfoot').textContent=''; return;
+  }
+  tbody.innerHTML = builders.map((b,i)=>`<tr>
+    <td style="color:var(--text3);font-size:11px">${i+1}</td>
+    <td><span class="bname" onclick="openProfile('${esc(b.name)}')"
+      title="${esc(b.name)}"
+      style="display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${b.name}</span></td>
+    <td><strong>${b.projects}</strong></td>
+    <td>${b.active}</td>
+    <td>${b.completed}</td>
+    <td>${fmtDays(b.avgBuildDays)}</td>
+    <td>${b.avgValue?fmtK(b.avgValue):'—'}</td>
+    <td class="${qClass(b.qualityFlagRate)}">${b.qualityFlagCount?`${b.qualityFlagCount} (${b.qualityFlagRate}%)`:'None'}</td>
+    <td style="font-size:12px;color:var(--text2)">${b.areas.slice(0,2).join(', ')}${b.areas.length>2?` +${b.areas.length-2}`:''}</td>
+  </tr>`).join('');
+  const total = builders.flatMap(b=>b.permits).length;
+  document.getElementById('tfoot').innerHTML =
+    `${builders.length} builders · ${total.toLocaleString()} permits · `+
+    `loaded in ${(loadStats.ms/1000).toFixed(1)}s · 2020–present · raleighnc.gov Open Data`+
+    ` &nbsp;·&nbsp; <span style="color:var(--text3)">Click column headers to sort</span>`+
+    ` &nbsp;<button onclick="clearSort()" style="font-size:11px;padding:2px 8px;border:0.5px solid var(--border2);border-radius:4px;background:none;color:var(--text2);cursor:pointer;margin-left:4px">Clear sort</button>`;
+}
+
+// ---------------------------------------------------------------------------
+// Builder profile with pagination (First/Prev/Next/Last)
+// ---------------------------------------------------------------------------
+// openMapProfile — same as openProfile but renders into mx-profile-wrap
+// so the user stays on the Map Search tab
+function showBackToTop(show) {
+  const btn = document.getElementById('back-to-top');
+  if (btn) btn.style.display = show ? 'flex' : 'none';
+}
+
+window.openMapProfile = function(name, page=0) {
+  // Reuse openProfile's full render but swap the target container and pagination fn
+  const b = allBuilders.find(x=>x.name===name);
+  if (!b) return;
+
+  // Temporarily override profile-wrap target and pagination fn name
+  const origWrap = document.getElementById('profile-wrap');
+  const mxWrap   = document.getElementById('mx-profile-wrap');
+
+  // Call openProfile which writes to profile-wrap, then move the HTML
+  openProfile(name, page);
+
+  // After setTimeout fires in openProfile, move the result across
+  setTimeout(() => {
+    if (origWrap && mxWrap && origWrap.innerHTML) {
+      mxWrap.innerHTML = origWrap.innerHTML;
+      origWrap.innerHTML = '';
+
+      // Fix the close button to clear mx-profile-wrap instead
+      const closeBtn = mxWrap.querySelector('.close-btn');
+      if (closeBtn) closeBtn.setAttribute('onclick', "document.getElementById('mx-profile-wrap').innerHTML='';showBackToTop(false)");
+
+      // Fix all pagination buttons to call openMapProfile instead of openProfile
+      mxWrap.querySelectorAll('.page-btn').forEach(btn => {
+        btn.setAttribute('onclick', btn.getAttribute('onclick').replace(/openProfile\(/g, 'openMapProfile('));
+      });
+
+      // Scroll to profile within map tab
+      const headerH = document.querySelector('header')?.offsetHeight || 48;
+      const top = mxWrap.getBoundingClientRect().top + window.scrollY - headerH - 12;
+      window.scrollTo({ top, behavior: 'smooth' });
+
+      // Re-init the map and chart since they're now in a new DOM location
+      setTimeout(() => { initProfileMap(b); initProfileChart(b); }, 60);
+    }
+  }, 120);
+};
+
+window.openProfile = function(name, page=0) {
+  const b = allBuilders.find(x=>x.name===name);
+  if (!b) return;
+  profilePage = page;
+
+  const buildInsight = b.avgBuildDays
+    ? `Averages <strong>${fmtDays(b.avgBuildDays)}</strong> from permit to finalization (${b.completed} completed project${b.completed!==1?'s':''}).`
+    : `No completed permits yet — build time cannot be calculated.`;
+
+  const slowBuilds    = b.permits.filter(p=>p.qualityReasons?.some(r=>r.startsWith('slow')));
+  const stalledBuilds = b.permits.filter(p=>p.qualityReasons?.some(r=>r.startsWith('stalled')));
+  const commentFlags  = b.permits.filter(p=>p.qualityReasons?.some(r=>r.startsWith('comment')));
+
+  const qualityInsight = b.qualityFlagCount===0
+    ? `<span class="qgood">No quality flags detected</span> in the open data.`
+    : `<span class="${qClass(b.qualityFlagRate)}">${b.qualityFlagCount} flag${b.qualityFlagCount!==1?'s':''} `+
+      `(${b.qualityFlagRate}% of permits)</span>${b.qualityFlagCount?' — flagged projects shown first.':''} `+
+      `Full inspection history: click any permit number → Inspections tab.`;
+
+  const statusRows = Object.entries(b.statusCounts)
+    .sort((a,b2)=>b2[1]-a[1])
+    .map(([s,n])=>`${sBadge(s,true)} <span style="font-size:11px;color:var(--text3);margin-right:3px">${n}</span>`)
+    .join('');
+
+  // Sort: flagged first, then completed, then by date desc
+  const sortedAll = [...b.permits].sort((a,bb)=>{
+    const score = p=>p.isQualityFlag?3:p.isCompleted?2:1;
+    return score(bb)-score(a)||(bb.applieddate||0)-(a.applieddate||0);
+  });
+
+  const totalPages = Math.ceil(sortedAll.length/PAGE_SZ);
+  const pagePermits = sortedAll.slice(page*PAGE_SZ,(page+1)*PAGE_SZ);
+
+  function pagBtn(label, targetPage, disabled=false) {
+    return `<button class="page-btn" ${disabled?'disabled':''} onclick="openProfile('${esc(name)}',${targetPage})">${label}</button>`;
+  }
+
+  const paginationHTML = sortedAll.length>PAGE_SZ ? `
+    <div class="pagination">
+      ${pagBtn('« First', 0, page===0)}
+      ${pagBtn('‹ Prev',  page-1, page===0)}
+      <span>Page ${page+1} of ${totalPages} &nbsp;·&nbsp; ${sortedAll.length} total projects</span>
+      ${pagBtn('Next ›',  page+1, page>=totalPages-1)}
+      ${pagBtn('Last »',  totalPages-1, page>=totalPages-1)}
+      <span style="color:var(--text3)">Showing ${page*PAGE_SZ+1}–${Math.min((page+1)*PAGE_SZ,sortedAll.length)}</span>
+    </div>` : `<div style="font-size:12px;color:var(--text3)">${sortedAll.length} project${sortedAll.length!==1?'s':''}</div>`;
+
+  document.getElementById('profile-wrap').innerHTML = `
+    <div class="profile">
+      <div class="profile-head">
+        <div>
+          <div class="profile-name">${b.name}</div>
+          <div class="profile-meta">
+            ${b.phone?`<a href="tel:${b.phone}">${fmtPhone(b.phone)}</a> · `:''}
+            ${b.email?`<a href="mailto:${b.email}">${b.email}</a> · `:''}
+            ${b.addr?`${b.addr} · `:''}
+            ${b.licNum?`License: ${b.licNum} · `:''}
+            ${b.yearsActive?`In dataset: ${b.yearsActive}y · `:''}
+            Areas: ${b.areas.join(', ')}
+          </div>
+        </div>
+        <button class="close-btn" onclick="document.getElementById('profile-wrap').innerHTML='';showBackToTop(false)">×</button>
+      </div>
+
+      <div class="profile-body">
+        <div class="pcol">
+          <div class="slbl">Performance (2020–present)</div>
+          <div class="srow"><span class="srbl">Total permits</span><span class="srv">${b.projects}</span></div>
+          <div class="srow"><span class="srbl">Active / in-progress</span><span class="srv">${b.active}</span></div>
+          <div class="srow"><span class="srbl">Completed</span><span class="srv">${b.completed}</span></div>
+          <div class="srow"><span class="srbl">Completion rate</span><span class="srv">${b.completionRate}%</span></div>
+          <div class="srow"><span class="srbl">Avg. build time</span><span class="srv">${fmtDays(b.avgBuildDays)}</span></div>
+          <div class="srow"><span class="srbl">Avg. permit value</span><span class="srv">${b.avgValue?fmtK(b.avgValue):'—'}</span></div>
+          <div class="insight">${buildInsight}</div>
+        </div>
+
+        <div class="pcol">
+          <div class="slbl">Quality indicators</div>
+          <div class="srow"><span class="srbl">Total flags</span><span class="srv ${qClass(b.qualityFlagRate)}">${b.qualityFlagCount} (${b.qualityFlagRate}%)</span></div>
+          <div class="srow"><span class="srbl">Slow builds (&gt;19 months)</span><span class="srv ${slowBuilds.length?'qwarn':''}">${slowBuilds.length||'—'}</span></div>
+          <div class="srow"><span class="srbl">Stalled permits</span><span class="srv ${stalledBuilds.length?'qbad':''}">${stalledBuilds.length||'—'}</span></div>
+          <div class="srow"><span class="srbl">Comment flags</span><span class="srv ${commentFlags.length?'qwarn':''}">${commentFlags.length||'—'}</span></div>
+          <div class="insight">${qualityInsight}</div>
+          <div style="margin-top:.75rem">
+            <div class="slbl" style="margin-bottom:.4rem">Status breakdown <span style="font-size:10px;text-transform:none;font-weight:400">(click to filter)</span></div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap">${statusRows}</div>
+          </div>
+        </div>
+
+        <div class="pcol">
+          <div class="slbl">Verify this builder</div>
+          <div class="links-grid">
+            <div class="lcard">
+              <div class="lcard-t">NC License Board</div>
+              <div class="lcard-d">Verify license status, history &amp; complaints</div>
+              <a href="${ncLicenseURL(b.licNum,b.name)}" target="_blank" rel="noopener">Search licenses →</a>
+            </div>
+            <div class="lcard">
+              <div class="lcard-t">NC Secretary of State</div>
+              <div class="lcard-d">Business registration &amp; entity status</div>
+              <a href="${ncSOSURL(b.name)}" target="_blank" rel="noopener">Search businesses →</a>
+            </div>
+            <div class="lcard">
+              <div class="lcard-t">NC Courts &amp; Liens</div>
+              <div class="lcard-d">Civil cases, mechanics liens &amp; judgments</div>
+              <a href="${ncCourtsURL(b.name)}" target="_blank" rel="noopener">Search court records →</a>
+            </div>
+            <div class="lcard">
+              <div class="lcard-t">Permit Portal</div>
+              <div class="lcard-d">Full inspection history, plans &amp; documents</div>
+              <a href="https://raleighnc-energovpub.tylerhost.net/apps/selfservice#/search" target="_blank" rel="noopener">Search permits →</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="pcol">
+          <div class="slbl">Inspections</div>
+          <div class="insight" style="margin-top:0;margin-bottom:.75rem;line-height:1.7">
+            Inspection pass/fail records are not in the open data — they live in the EnerGov portal (no login required).<br><br>
+            To view: click any permit number below → portal opens → click the <strong>Inspections</strong> tab.
+          </div>
+          <div style="font-size:12px;color:var(--text2)">What to look for:</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.8;margin-top:.3rem">
+            · <strong>Failed</strong> = work didn't meet code<br>
+            · <strong>Re-inspection</strong> = required fixes after failure<br>
+            · High re-inspection ratio = red flag
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-map-wrap">
+        <div class="profile-map-col">
+          <div class="slbl" style="margin-bottom:.65rem">Project locations</div>
+          <div class="pmap" id="pmap-${b.name.replace(/\W/g,'_')}"></div>
+        </div>
+        <div class="profile-chart-col">
+          <div class="slbl" style="margin-bottom:.65rem">
+            Avg. build time by quarter
+            <span style="font-size:10px;font-weight:400;text-transform:none;color:var(--text3);margin-left:6px">(completed permits only · red line = 19mo threshold)</span>
+          </div>
+          <div class="pchart"><canvas id="pchart-${b.name.replace(/\W/g,'_')}"></canvas></div>
+        </div>
+      </div>
+
+      <div class="proj-section">
+        <div class="proj-controls">
+          <div style="font-size:13px;font-weight:500">
+            Projects ${b.qualityFlagCount?`<span style="font-size:11px;font-weight:400;color:var(--red);margin-left:6px">· flagged shown first</span>`:''}
+          </div>
+          ${paginationHTML}
+        </div>
+        <div class="proj-grid">
+          ${pagePermits.map(p=>projCard(p)).join('')}
+        </div>
+        ${sortedAll.length>PAGE_SZ ? paginationHTML : ''}
+      </div>
+    </div>`;
+
+  // Defer scroll until after the browser has painted the new content
+  setTimeout(() => {
+    const wrap = document.getElementById('profile-wrap');
+    if (!wrap) return;
+    const headerH = document.querySelector('header')?.offsetHeight || 48;
+    const top = wrap.getBoundingClientRect().top + window.scrollY - headerH - 12;
+    window.scrollTo({ top, behavior: 'smooth' });
+    showBackToTop(true);
+    initProfileMap(b);
+    initProfileChart(b);
+  }, 50);
+};
+
+function initProfileMap(b) {
+  const mapId = 'pmap-' + b.name.replace(/\W/g,'_');
+  const el = document.getElementById(mapId);
+  if (!el) return;
+
+  const pts = b.permits.filter(p => p.latitude_perm && p.longitude_perm && p.latitude_perm !== 0);
+  if (!pts.length) {
+    el.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text3)">No coordinates available</div>';
+    return;
+  }
+
+  const m = L.map(el, { zoomControl: true, scrollWheelZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap', maxZoom: 18,
+  }).addTo(m);
+
+  // Color by status
+  const statusColor = p => {
+    if (p.isQualityFlag)                          return '#a32d2d'; // red = flagged
+    if (p.isCompleted)                            return '#0f6e56'; // teal = done
+    if (['Active','Issued','Permit Issued'].includes(p.statuscurrent)) return '#185fa5'; // blue = active
+    return '#9c9a92'; // grey = other
+  };
+
+  const bounds = [];
+  for (const p of pts) {
+    const color = statusColor(p);
+    const mk = L.circleMarker([p.latitude_perm, p.longitude_perm], {
+      radius: 6, fillColor: color, color: '#fff', weight: 1.5,
+      opacity: 1, fillOpacity: 0.85,
+    });
+    mk.bindPopup(`
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">${p.originaladdress1||'No address'}</div>
+      <div style="font-size:11px;color:#666;margin-bottom:3px">${p.statuscurrent||''} · ${p.area||''}</div>
+      ${p.buildDays?`<div style="font-size:11px;margin-bottom:3px">Build time: ${fmtDays(p.buildDays)}</div>`:''}
+      ${p.estprojectcost?`<div style="font-size:11px;margin-bottom:4px">Value: ${fmtK(p.estprojectcost)}</div>`:''}
+      <a href="${permitPortalURL(p.permitnum)}" target="_blank" style="font-size:11px">${p.permitnum} →</a>
+    `, { maxWidth: 200 });
+    mk.addTo(m);
+    bounds.push([p.latitude_perm, p.longitude_perm]);
+  }
+
+  m.fitBounds(L.latLngBounds(bounds), { padding: [20, 20], maxZoom: 14 });
+
+  // Legend
+  const legend = L.control({ position: 'bottomright' });
+  legend.onAdd = () => {
+    const d = L.DomUtil.create('div');
+    d.style.cssText = 'background:rgba(255,255,255,.9);padding:5px 8px;border-radius:6px;font-size:11px;line-height:1.8';
+    d.innerHTML = [
+      ['#185fa5','Active'],['#0f6e56','Completed'],
+      ['#a32d2d','Flagged'],['#9c9a92','Other'],
+    ].map(([c,l])=>`<div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c};margin-right:5px;vertical-align:middle"></span>${l}</div>`).join('');
+    return d;
+  };
+  legend.addTo(m);
+}
+
+function initProfileChart(b) {
+  const chartId = 'pchart-' + b.name.replace(/\W/g,'_');
+  const canvas = document.getElementById(chartId);
+  if (!canvas) return;
+
+  // Only completed permits with a build time and applied date
+  const completed = b.permits.filter(p => p.isCompleted && p.buildDays && p.applieddate);
+
+  if (completed.length < 2) {
+    canvas.parentElement.innerHTML =
+      `<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text3);text-align:center;padding:1rem">
+        Not enough completed permits to show a trend<br>
+        <span style="font-size:11px;margin-top:4px;display:block">(need at least 2 with build time data)</span>
+      </div>`;
+    return;
+  }
+
+  // Group by quarter: "Q1 2022", "Q2 2023" etc
+  const qKey = epochMs => {
+    const d = new Date(epochMs);
+    return `Q${Math.floor(d.getMonth()/3)+1} ${d.getFullYear()}`;
+  };
+  const qOrder = epochMs => {
+    const d = new Date(epochMs);
+    return d.getFullYear() * 10 + Math.floor(d.getMonth()/3);
+  };
+
+  const byQ = {};
+  for (const p of completed) {
+    const k = qKey(p.applieddate);
+    if (!byQ[k]) byQ[k] = { sum: 0, count: 0, order: qOrder(p.applieddate) };
+    byQ[k].sum   += p.buildDays;
+    byQ[k].count += 1;
+  }
+
+  // Sort quarters chronologically
+  const quarters = Object.entries(byQ)
+    .sort((a,b) => a[1].order - b[1].order)
+    .map(([label, { sum, count }]) => ({
+      label,
+      avg: Math.round(sum / count / 30.4 * 10) / 10, // convert days → months
+      count,
+    }));
+
+  // Determine bar colors: over threshold = amber, under = teal
+  const THRESHOLD_MO = 19;
+  const barColors = quarters.map(q =>
+    q.avg > THRESHOLD_MO ? 'rgba(133,79,11,0.75)' : 'rgba(15,110,86,0.75)'
+  );
+
+  // Get CSS variable values for theming
+  const isDark = window.matchMedia('(prefers-color-scheme:dark)').matches;
+  const textColor  = isDark ? '#9c9a92' : '#5f5e5a';
+  const gridColor  = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+
+  new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: quarters.map(q => `${q.label}\n(n=${q.count})`),
+      datasets: [
+        {
+          label: 'Avg. build time (months)',
+          data: quarters.map(q => q.avg),
+          backgroundColor: barColors,
+          borderRadius: 4,
+          borderSkipped: false,
+        },
+        {
+          // Threshold line as a fake dataset
+          label: '19-month threshold',
+          data: quarters.map(() => THRESHOLD_MO),
+          type: 'line',
+          borderColor: 'rgba(163,45,45,0.7)',
+          borderWidth: 1.5,
+          borderDash: [4, 3],
+          pointRadius: 0,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: {
+            color: textColor,
+            font: { size: 11 },
+            boxWidth: 12,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.datasetIndex === 0
+              ? `${ctx.parsed.y} months`
+              : '19-month threshold',
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: textColor, font: { size: 10 } },
+          grid:  { color: gridColor },
+        },
+        y: {
+          ticks: {
+            color: textColor,
+            font: { size: 10 },
+            callback: v => v + 'mo',
+          },
+          grid:  { color: gridColor },
+          title: { display: false },
+          beginAtZero: true,
+        },
+      },
+    },
+  });
+}
+
+function projCard(p) {
+  const portal  = permitPortalURL(p.permitnum);
+  const wakeURL = wakePropertyURL(p.pin, p.originaladdress1);
+  const applied = fmtDate(p.applieddate);
+  const issued  = fmtMo(p.issueddate);
+  const updated = fmtMo(p.recordupdatedate);
+  const hasOwner= p.isCompleted && p.parcelownername;
+  const cls     = p.isQualityFlag?'flagged':p.isCompleted?'done':'';
+  return `<div class="proj-card ${cls}">
+    <div class="paddr" title="${p.originaladdress1||''}">${p.originaladdress1||'No address'}</div>
+    <div class="pid"><a href="${portal}" target="_blank" rel="noopener">${p.permitnum||'—'}</a> · ${p.zip5||''} ${p.area||''}</div>
+    <div style="margin-bottom:5px">${sBadge(p.statuscurrent)}</div>
+    <div class="prow"><span class="plbl">Applied</span><span class="pval muted">${applied||'—'}</span></div>
+    ${p.buildDays?`<div class="prow"><span class="plbl">Build time</span><span class="pval">${fmtDays(p.buildDays)}</span></div>`:''}
+    ${p.estprojectcost?`<div class="prow"><span class="plbl">Est. value</span><span class="pval">${fmtK(p.estprojectcost)}</span></div>`:''}
+    ${p.totalsqft?`<div class="prow"><span class="plbl">Sq ft</span><span class="pval">${p.totalsqft.toLocaleString()}</span></div>`:''}
+    ${issued?`<div class="prow"><span class="plbl">Issued</span><span class="pval muted">${issued}</span></div>`:''}
+    ${p.isCompleted&&updated?`<div class="prow"><span class="plbl">Finalized</span><span class="pval good">${updated}</span></div>`:''}
+    ${p.isCompleted&&p.completionSignal?`<div class="prow"><span class="plbl" style="color:var(--text3)">Signal</span><span class="pval muted" style="font-size:11px">${p.completionSignal}</span></div>`:''}
+    ${p.isQualityFlag?`<div class="prow"><span class="plbl" style="color:var(--red)">Flag</span><span class="pval bad" style="font-size:11px;white-space:normal;text-align:right;max-width:120px">${p.qualityReasons[0]||''}</span></div>`:''}
+    ${hasOwner?`<div class="owner-section">
+      <div class="owner-lbl">Parcel owner at permit time</div>
+      <div class="owner-name">${p.parcelownername}</div>
+      <div style="margin-top:4px"><a href="${wakeURL}" target="_blank" rel="noopener">Current owner (Wake Co.) →</a></div>
+    </div>`:p.isCompleted?`<div class="owner-section"><a href="${wakeURL}" target="_blank" rel="noopener">Look up current owner (Wake Co.) →</a></div>`:''}
+  </div>`;
+}
+
+function fmtPhone(raw) {
+  const d=(raw||'').replace(/\D/g,'');
+  return d.length===10?`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`:raw;
+}
+
+// ---------------------------------------------------------------------------
+// Quality tab
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Debug
+// ---------------------------------------------------------------------------
+function buildDebugTab() {
+  document.getElementById('debug-info').innerHTML = [
+    `Permits: <strong>${loadStats.permits?.toLocaleString()}</strong>`,
+    `Builders: <strong>${loadStats.builders}</strong>`,
+    `Load time: <strong>${(loadStats.ms/1000).toFixed(1)}s</strong>`,
+    `Data source: <strong>${loadStats.fromCache ? `Cached JSON (fetched ${new Date(loadStats.cachedAt).toLocaleString()})` : 'Live ArcGIS API'}</strong>`,
+    `Completion signals: <strong>statuscurrentmapped='Permit Finaled' | statuscurrent='Complete' | constcompletedofficial='Yes'</strong>`,
+    `Build time proxy: <strong>recordupdatedate − applieddate (coissueddate is null in this dataset)</strong>`,
+    `Quality flags: <strong>slow builds (&gt;19mo) · stalled (&gt;1yr issued) · comment keywords</strong>`,
+    `NC License Board: <a href="https://portal.nclbgc.org/Public/Search" target="_blank">portal.nclbgc.org/Public/Search</a>`,
+    `NC SOS: <a href="https://www.sosnc.gov/online_services/search/by_title/_Business_RegistrationNorth%20Carolina" target="_blank">sosnc.gov Business Registration</a>`,
+    `NC Courts &amp; Liens: <a href="https://portal-nc.tylertech.cloud/Portal/Home/Dashboard/29" target="_blank">portal-nc.tylertech.cloud</a>`,
+  ].map(s=>`<div style="padding:4px 0;border-bottom:0.5px solid var(--border)">${s}</div>`).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+window.goTab = function(id, el) {
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  if (el) el.classList.add('active');
+};
+
+// ---------------------------------------------------------------------------
+// Error
+// ---------------------------------------------------------------------------
+function showErr(e) {
+  const el = document.getElementById('err');
+  el.style.display='block';
+  el.innerHTML=`<strong>Load error</strong><br>${e.message}<br><br>Run <code>python3 -m http.server 8000</code> and visit <code>http://localhost:8000</code>.`;
+}
+
+boot();
+</script>
+</body>
+</html>

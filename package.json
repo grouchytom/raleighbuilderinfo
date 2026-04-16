@@ -1,0 +1,12 @@
+{
+  "name": "raleigh-builder-intelligence",
+  "version": "1.0.0",
+  "description": "Raleigh new residential building permit dashboard",
+  "type": "module",
+  "scripts": {
+    "fetch": "node scripts/fetch-permits.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

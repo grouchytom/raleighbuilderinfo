@@ -1,21 +1,13 @@
 # .github/workflows/update-data.yml
-#
-# Runs every night at midnight UTC.
-# Fetches the latest Raleigh building permit data and commits
-# data/permits.json back to the repository.
-#
-# The app loads this cached file instead of hitting ArcGIS live,
-# cutting load time from ~20s to under 1s.
-
 name: Update permit data
 
 on:
-  # Run every night at midnight UTC (8pm Eastern)
   schedule:
     - cron: '0 0 * * *'
-
-  # Also allow manual trigger from the GitHub Actions tab
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   fetch:
@@ -23,12 +15,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Fetch permit data
         run: node scripts/fetch-permits.js
@@ -38,7 +30,6 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Only commit if permits.json actually changed
           if git diff --quiet data/permits.json; then
             echo "No changes to permits.json — skipping commit"
           else

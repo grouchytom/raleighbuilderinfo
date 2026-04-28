@@ -1,20 +1,12 @@
 /**
  * raleigh-permits-api.js
  *
- * Field values confirmed from live record BLDR-012780-2023:
- *
- *   statuscurrent:       "Complete"           ← completed permits
- *   statuscurrentmapped: "Permit Finaled"     ← reliable completion signal
- *   coissueddate:        null                 ← NOT populated, do not use
- *   cocissueddate:       null                 ← NOT populated, do not use
- *   recordupdatedate:    epoch ms             ← use as proxy finalization date
- *   pin:                 "1706438749"         ← Wake County parcel PIN (populated)
- *   cntyacctnum:         null                 ← NOT populated, use pin instead
- *   parcelownername:     "CUSTOM ESTATE..."   ← current owner name (on permit!)
- *   parcelowneraddress1: "207 W MILLBROOK..." ← owner mailing address
- *   contractoremail:     populated            ← builder contact info available
- *   contractorphone:     populated            ← builder phone available
- *   constcompletedofficial: "No"/"Yes"        ← construction completion flag
+ * Confirmed field values (live data 2026-04-10):
+ *   statuscurrent:       "Complete" / "Issued" etc.
+ *   statuscurrentmapped: "Permit Finaled" = completed
+ *   workclassmapped:     "New" = new construction | "Existing" = renovation
+ *   coissueddate:        null in this dataset — use recordupdatedate as proxy
+ *   pin:                 populated (Wake County parcel ID)
  */
 
 const PERMITS_FS =
@@ -22,8 +14,16 @@ const PERMITS_FS =
   '/Building_Permits/FeatureServer/0';
 
 const CUTOFF_DATE = '2020-01-01';
-const RESIDENTIAL_WORK_CLASSES = ['New'];
-const RESIDENTIAL_PERMIT_CLASS = 'Residential';
+
+// Renovation workclass values to EXCLUDE — not useful for contractor research
+const RENO_EXCLUDE_WORKCLASS = [
+  'Demolish', 'NON-CONSTRUCTION INSPECTION', 'Change Of Use',
+  'Foundation Only', 'Specialty', 'Other', 'Other - Comm', 'Other - Resd',
+  'Mobile Home Original', 'Mobile Home Replacement',
+  'Manufactured Home Original', 'Manufactured Home Repairs',
+  'Manufactured Home Replacement', 'Manufactured Home Original',
+  'Swimming Pool - Commercial',
+];
 
 const PERMIT_FIELDS = [
   'permitnum', 'workclass', 'workclassmapped',
@@ -57,113 +57,87 @@ const ZIP_TO_AREA = {
 
 const PAGE_SIZE = 2000;
 
-/**
- * Completed = statuscurrentmapped is "Permit Finaled"
- * OR statuscurrent is "Complete" (confirmed from live data).
- * coissueddate is null in this dataset — do not rely on it.
- */
-const COMPLETED_STATUS_MAPPED = new Set(['Permit Finaled']);
-const COMPLETED_STATUS_CURRENT = new Set(['Complete', 'Closed', 'Final', 'CO Issued', 'CO Final']);
+export const STATUS_WEIGHTS = {
+  'Application Accepted':5, 'Pending':10, 'Under Review':20, 'In Review':20,
+  'Approved':40, 'Issued':55, 'Permit Issued':55, 'Active':60,
+  'Inspections In Progress':75, 'CO Issued':100, 'CO Final':100,
+  'Final':100, 'Closed':100, 'Expired':50, 'Withdrawn':0,
+};
 
 const ACTIVE_STATUSES = new Set([
-  'Active', 'Issued', 'Permit Issued', 'In Review',
-  'Under Review', 'Approved', 'Inspections In Progress', 'Pending',
-  'Permit Issued', 'Inspections',
+  'Active','Issued','Permit Issued','In Review',
+  'Under Review','Approved','Inspections In Progress','Pending',
 ]);
-
-/**
- * Quality flags — what we CAN detect from this dataset:
- *
- * The ArcGIS layer does NOT store inspection history. statuscurrent is
- * point-in-time only. Failed inspections are not visible once the permit
- * advances past that status.
- *
- * What we CAN flag:
- *   1. constcompletedofficial = "No" on a permit that was issued long ago
- *      (construction started but not officially complete)
- *   2. Very long time between issueddate and recordupdatedate (stalled builds)
- *   3. reviewercomments or perm_comments containing flag keywords
- *      (these persist even after status changes)
- */
-const COMMENT_FLAG_KEYWORDS = [
-  'resubmit', 're-submit', 'correction', 'deficiency',
-  'rejected', 'failed', 'violation', 'non-compliant',
-  'stop work', 'revise', 'incomplete',
+const COMPLETED_STATUS_MAPPED  = new Set(['Permit Finaled']);
+const COMPLETED_STATUS_CURRENT = new Set(['Complete','Closed','Final','CO Issued','CO Final']);
+const STALLED_DAYS_THRESHOLD   = 365;
+const COMMENT_FLAG_KEYWORDS    = [
+  'resubmit','re-submit','correction','deficiency',
+  'rejected','failed','violation','non-compliant',
+  'stop work','revise','incomplete',
 ];
 
-const STALLED_DAYS_THRESHOLD = 365; // issued but no progress for > 1 year
-
 // ---------------------------------------------------------------------------
-// Deep links — all confirmed working
+// WHERE clause — mode aware
 // ---------------------------------------------------------------------------
 
-/** EnerGov self-service portal — confirmed URL pattern from user */
+/**
+ * mode: 'new'  → new construction (workclassmapped = 'New')
+ * mode: 'reno' → renovation/existing (workclassmapped = 'Existing')
+ * mode: 'all'  → both (used by Map Search)
+ */
+export function buildWhereClause(mode = 'new') {
+  const base = `permitclassmapped = 'Residential' AND applieddate >= DATE '${CUTOFF_DATE}'`;
+  if (mode === 'new')  return `workclassmapped = 'New' AND ${base}`;
+  if (mode === 'reno') return `workclassmapped = 'Existing' AND ${base}`;
+  return `workclassmapped IN ('New','Existing') AND ${base}`;
+}
+
+// ---------------------------------------------------------------------------
+// Deep links
+// ---------------------------------------------------------------------------
+
 export function permitPortalURL(permitnum) {
   if (!permitnum) return 'https://raleighnc-energovpub.tylerhost.net/apps/selfservice#/search';
   return `https://raleighnc-energovpub.tylerhost.net/apps/selfservice` +
          `#/search?m=1&fm=1&ps=10&pn=1&em=true&st=${encodeURIComponent(permitnum)}`;
 }
 
-/**
- * Wake County Real Estate — use PIN (parcel ID) for direct lookup.
- * Confirmed PIN is populated (e.g. "1706438749").
- * URL pattern: services.wake.gov/realestate/Account.asp?id=REID&stype=pin
- *
- * For address-based fallback, use the pattern from user example:
- * https://services.wake.gov/realestate/Account.asp?id=0508431&stype=addr&stnum=1400&stname=Mordecai
- */
 export function wakePropertyURL(pin, address) {
-  if (pin && pin.trim()) {
-    return `https://services.wake.gov/realestate/Account.asp` +
-           `?id=${encodeURIComponent(pin.trim())}&stype=pin`;
+  if (pin?.trim()) {
+    return `https://services.wake.gov/realestate/Account.asp?id=${encodeURIComponent(pin.trim())}&stype=pin`;
   }
   if (address) {
     const parts = address.trim().split(/\s+/);
-    const stnum  = parts[0] || '';
-    const stname = parts[1] || '';
     return `https://services.wake.gov/realestate/Account.asp` +
-           `?stype=addr&stnum=${encodeURIComponent(stnum)}&stname=${encodeURIComponent(stname)}`;
+           `?stype=addr&stnum=${encodeURIComponent(parts[0]||'')}&stname=${encodeURIComponent(parts[1]||'')}`;
   }
   return 'https://services.wake.gov/realestate/';
 }
 
-/** NC License Board — confirmed URL from user */
 export function ncLicenseURL(licNum, companyName) {
-  // The NCLBGC verify license portal — search by license number or company name
   return `https://portal.nclbgc.org/Public/Search`;
 }
-
-/** NC Secretary of State business search — confirmed URL from user */
 export function ncSOSURL(companyName) {
   return `https://www.sosnc.gov/online_services/search/by_title/_Business_RegistrationNorth%20Carolina`;
 }
-
-/**
- * NC Courts / legal lookup — confirmed URL from user.
- * Covers civil cases, mechanics liens (special proceedings), and judgments.
- * More comprehensive than Wake County ROD for legal research.
- */
 export function ncCourtsURL(companyName) {
   return `https://portal-nc.tylertech.cloud/Portal/Home/Dashboard/29`;
 }
-
 
 // ---------------------------------------------------------------------------
 // Fetch
 // ---------------------------------------------------------------------------
 
-function buildWhereClause() {
-  const wc = RESIDENTIAL_WORK_CLASSES.map(w => `workclassmapped = '${w}'`).join(' OR ');
-  return `(${wc}) AND permitclassmapped = '${RESIDENTIAL_PERMIT_CLASS}'` +
-         ` AND applieddate >= DATE '${CUTOFF_DATE}'`;
-}
-
-async function fetchPermitPage(offset, signal) {
+async function fetchPage(offset, mode, signal) {
   const params = new URLSearchParams({
-    where: buildWhereClause(), outFields: PERMIT_FIELDS,
-    returnGeometry: 'false', resultOffset: String(offset),
+    where:             buildWhereClause(mode),
+    outFields:         PERMIT_FIELDS,
+    returnGeometry:    'false',
+    resultOffset:      String(offset),
     resultRecordCount: String(PAGE_SIZE),
-    orderByFields: 'applieddate DESC', f: 'json',
+    orderByFields:     'applieddate DESC',
+    f:                 'json',
   });
   let res;
   try {
@@ -177,11 +151,11 @@ async function fetchPermitPage(offset, signal) {
   return { features: json.features||[], exceededTransferLimit: json.exceededTransferLimit??false };
 }
 
-async function fetchAllPermits({ onProgress, signal } = {}) {
+async function fetchAllPermits({ onProgress, signal, mode = 'new' } = {}) {
   const all = [];
   let offset = 0, hasMore = true, page = 0;
   while (hasMore) {
-    const { features, exceededTransferLimit } = await fetchPermitPage(offset, signal);
+    const { features, exceededTransferLimit } = await fetchPage(offset, mode, signal);
     all.push(...features.map(f => f.attributes));
     hasMore = exceededTransferLimit && features.length === PAGE_SIZE;
     offset += features.length; page++;
@@ -195,102 +169,81 @@ export async function probeFields() {
   console.group('ArcGIS probe');
   const o = { mode:'cors' };
   const b = `${PERMITS_FS}/query`;
-
-  const sc = await (await fetch(`${b}?where=1%3D1&outFields=statuscurrent,statuscurrentmapped&returnDistinctValues=true&returnGeometry=false&orderByFields=statuscurrent&f=json`, o)).json();
-  console.log('statuscurrent values:', sc.features?.map(f => ({
-    current: f.attributes.statuscurrent,
-    mapped:  f.attributes.statuscurrentmapped,
-  })));
-
-  // Sample a "Complete" permit to verify date fields
-  const comp = await (await fetch(`${b}?where=statuscurrentmapped%3D'Permit+Finaled'&outFields=permitnum,statuscurrent,statuscurrentmapped,applieddate,issueddate,recordupdatedate,coissueddate,cocissueddate,pin,cntyacctnum&returnGeometry=false&resultRecordCount=3&f=json`, o)).json();
-  console.log('Completed permit samples:', comp.features?.map(f => f.attributes));
-
-  console.log('WHERE clause:', buildWhereClause());
+  const wc = await (await fetch(`${b}?where=permitclassmapped%3D'Residential'&outFields=workclassmapped,workclass&returnDistinctValues=true&returnGeometry=false&orderByFields=workclassmapped&f=json`, o)).json();
+  console.log('All residential work classes:', wc.features?.map(f=>({mapped:f.attributes.workclassmapped,raw:f.attributes.workclass})));
+  const sc = await (await fetch(`${b}?where=1%3D1&outFields=statuscurrent&returnDistinctValues=true&returnGeometry=false&orderByFields=statuscurrent&f=json`, o)).json();
+  console.log('statuscurrent values:', sc.features?.map(f=>f.attributes.statuscurrent));
   console.groupEnd();
 }
 
 // ---------------------------------------------------------------------------
-// Tag permit — quality detection based on what's actually available
+// Tag permit
 // ---------------------------------------------------------------------------
+
+function detectCompletion(p) {
+  if (COMPLETED_STATUS_MAPPED.has(p.statuscurrentmapped))
+    return { completed: true, signal: 'Permit Finaled' };
+  if (COMPLETED_STATUS_CURRENT.has(p.statuscurrent))
+    return { completed: true, signal: p.statuscurrent };
+  if (p.constcompletedofficial === 'Yes')
+    return { completed: true, signal: 'Construction complete (official)' };
+  return { completed: false, signal: null };
+}
 
 function detectQualityFlag(p) {
   const reasons = [];
-
-  // Check comments for flag keywords (these persist after status changes)
   const comments = [p.reviewercomments, p.perm_comments, p.description]
     .filter(Boolean).join(' ').toLowerCase();
   for (const kw of COMMENT_FLAG_KEYWORDS) {
     if (comments.includes(kw)) { reasons.push(`comment: "${kw}"`); break; }
   }
-
-  // Slow build: completed but took longer than 19 months (575 days)
-  if (p.isCompleted && p.buildDays && p.buildDays > 575) {
+  // Slow build: >19 months for new construction, >24 months for renovations
+  const slowThreshold = p.workclassmapped === 'New' ? 575 : 730;
+  if (p.isCompleted && p.buildDays && p.buildDays > slowThreshold) {
     const months = Math.round(p.buildDays / 30.4);
-    reasons.push(`slow build: ${months} months to complete (threshold: 19 months)`);
+    const label  = p.workclassmapped === 'New' ? '19' : '24';
+    reasons.push(`slow build: ${months} months (threshold: ${label} months)`);
   }
-
-  // Stalled active build: issued > 1 year ago, not complete by any signal
   const { completed: alreadyComplete } = detectCompletion(p);
   if (!alreadyComplete && p.constcompletedofficial === 'No' && p.issueddate && ACTIVE_STATUSES.has(p.statuscurrent)) {
     const daysSinceIssued = Math.floor((Date.now() - p.issueddate) / 86_400_000);
     if (daysSinceIssued > STALLED_DAYS_THRESHOLD) {
-      reasons.push(`stalled: issued ${Math.round(daysSinceIssued/365*10)/10}y ago, construction not complete`);
+      reasons.push(`stalled: issued ${Math.round(daysSinceIssued/365*10)/10}y ago`);
     }
   }
-
   return reasons;
 }
 
-/**
- * Multi-signal completion detection.
- *
- * NOTE: parcelownername in the ArcGIS dataset is captured at permit filing time
- * and is NOT updated when the house sells. It is NOT a reliable signal for
- * current ownership or completion status. We use three other signals instead:
- *
- *   1. statuscurrentmapped = "Permit Finaled"
- *   2. statuscurrent = "Complete" / "Closed" / "Final" / "CO Issued" / "CO Final"
- *   3. constcompletedofficial = "Yes"
- *
- * For current ownership, always link to Wake County real estate (PIN-based).
- */
-function detectCompletion(p) {
-  if (COMPLETED_STATUS_MAPPED.has(p.statuscurrentmapped)) {
-    return { completed: true, signal: 'Permit Finaled' };
-  }
-  if (COMPLETED_STATUS_CURRENT.has(p.statuscurrent)) {
-    return { completed: true, signal: p.statuscurrent };
-  }
-  if (p.constcompletedofficial === 'Yes') {
-    return { completed: true, signal: 'Construction complete (official)' };
-  }
-  return { completed: false, signal: null };
-}
-
-function tagPermit(p) {
+export function tagPermit(p) {
   p.zip5 = String(p.originalzip || '').slice(0, 5);
   p.area = ZIP_TO_AREA[p.zip5] || 'Other';
+  p.permitMode = p.workclassmapped === 'New' ? 'new' : 'reno';
 
-  // Completion detection — multi-signal
+  // Filter out renovation noise
+  if (p.permitMode === 'reno' && p.workclass &&
+      RENO_EXCLUDE_WORKCLASS.some(ex => p.workclass.toLowerCase().includes(ex.toLowerCase()))) {
+    p._excluded = true;
+    return p;
+  }
+
   const { completed, signal } = detectCompletion(p);
   p.isCompleted      = completed;
   p.completionSignal = signal;
 
-  // Build time: recordupdatedate - applieddate.
-  // coissueddate is null in this dataset.
-  // recordupdatedate is the last record touch — for completed permits
-  // this approximates when the work stopped being tracked.
   if (p.isCompleted && p.applieddate && p.recordupdatedate) {
     const days = Math.floor((p.recordupdatedate - p.applieddate) / 86_400_000);
-    p.buildDays = (days >= 30 && days <= 1500) ? days : null;
+    p.buildDays = (days >= 14 && days <= 1825) ? days : null;
   } else {
     p.buildDays = null;
   }
 
-  // Quality flags — run AFTER buildDays is set (slow build check needs it)
+  // Permits in last 12 months
+  p.isLast12Months = p.applieddate
+    ? p.applieddate >= Date.now() - 365 * 86_400_000
+    : false;
+
   const flagReasons = detectQualityFlag(p);
-  p.isQualityFlag = flagReasons.length > 0;
+  p.isQualityFlag  = flagReasons.length > 0;
   p.qualityReasons = flagReasons;
 
   return p;
@@ -300,166 +253,130 @@ function tagPermit(p) {
 // Aggregation
 // ---------------------------------------------------------------------------
 
+function daysSince(epoch) {
+  if (!epoch) return 0;
+  return Math.max(0, Math.floor((Date.now() - epoch) / 86_400_000));
+}
+
 export function aggregateBuilders(permits) {
   const map = new Map();
 
   for (const p of permits) {
+    if (p._excluded) continue;
     const name = (p.contractorcompanyname || 'Unknown').trim();
     if (!map.has(name)) {
       map.set(name, {
-        name,
-        licNum:      p.contractorlicnum || p.statelicnum || null,
-        email:       p.contractoremail || null,
-        phone:       p.contractorphone || null,
-        addr:        [p.contractoraddress1, p.contractorcity, p.contractorstate]
-                       .filter(Boolean).join(', ') || null,
-        permits:     [],
-        areas:       new Set(),
-        zips:        new Set(),
-        earliestApplied: null,
+        name, licNum: p.contractorlicnum || p.statelicnum || null,
+        email: null, phone: null, addr: null,
+        permits:[], areas:new Set(), zips:new Set(), earliestApplied:null,
       });
     }
     const b = map.get(name);
     b.permits.push(p);
     if (p.area) b.areas.add(p.area);
     if (p.zip5) b.zips.add(p.zip5);
-    // Earliest applied date = how long active in dataset
-    if (p.applieddate && (!b.earliestApplied || p.applieddate < b.earliestApplied)) {
+    if (p.applieddate && (!b.earliestApplied || p.applieddate < b.earliestApplied))
       b.earliestApplied = p.applieddate;
-    }
-    // Pick up contact info from first record that has it
     if (!b.email && p.contractoremail) b.email = p.contractoremail;
     if (!b.phone && p.contractorphone) b.phone = p.contractorphone;
-    if (!b.addr  && p.contractoraddress1) {
+    if (!b.addr && p.contractoraddress1)
       b.addr = [p.contractoraddress1, p.contractorcity, p.contractorstate].filter(Boolean).join(', ');
-    }
   }
 
   return [...map.values()].map(b => {
     const ps        = b.permits;
     const completed = ps.filter(p => p.isCompleted);
     const buildTimes= completed.map(p => p.buildDays).filter(d => d !== null);
-
     const avgBuildDays = buildTimes.length
-      ? Math.round(buildTimes.reduce((s,v)=>s+v,0) / buildTimes.length)
-      : null;
-
+      ? Math.round(buildTimes.reduce((s,v)=>s+v,0) / buildTimes.length) : null;
     const completionRate = ps.length
       ? Math.round(completed.length / ps.length * 100) : 0;
-
     const vals = ps.filter(p=>p.estprojectcost).map(p=>p.estprojectcost);
     const avgValue = vals.length
       ? Math.round(vals.reduce((s,v)=>s+v,0)/vals.length) : 0;
-
-    const qualityFlags = ps.filter(p => p.isQualityFlag);
-    const qualityFlagRate = ps.length
+    const qualityFlags   = ps.filter(p => p.isQualityFlag);
+    const qualityFlagRate= ps.length
       ? Math.round(qualityFlags.length / ps.length * 100) : 0;
-
+    const last12 = ps.filter(p => p.isLast12Months).length;
     const yearsActive = b.earliestApplied
       ? Math.max(0.1, Math.round((Date.now() - b.earliestApplied) / (365.25*86_400_000) * 10) / 10)
       : null;
-
     const statusCounts = {};
     for (const p of ps) {
       const st = p.statuscurrent || 'Unknown';
       statusCounts[st] = (statusCounts[st]||0) + 1;
     }
+    // Work type breakdown for renovation mode
+    const workTypes = {};
+    for (const p of ps) {
+      const wt = p.workclass || 'Unknown';
+      workTypes[wt] = (workTypes[wt]||0) + 1;
+    }
 
     return {
       name: b.name, licNum: b.licNum, email: b.email, phone: b.phone, addr: b.addr,
-      projects: ps.length,
-      active:   ps.filter(p => ACTIVE_STATUSES.has(p.statuscurrent)).length,
-      completed: completed.length,
-      completionRate, avgBuildDays, avgValue,
+      projects: ps.length, active: ps.filter(p => ACTIVE_STATUSES.has(p.statuscurrent)).length,
+      completed: completed.length, completionRate, avgBuildDays, avgValue,
       qualityFlagCount: qualityFlags.length, qualityFlagRate,
+      last12,   // ← permits in last 12 months
       yearsActive, areas: [...b.areas].sort(), zips: [...b.zips].sort(),
-      statusCounts, permits: ps,
+      statusCounts, workTypes, permits: ps,
     };
   }).sort((a,b) => b.projects - a.projects);
 }
 
 export function filterBuilders(allPermits, { area, zip, status, search } = {}) {
-  const q = search ? search.toLowerCase().trim() : '';
-
-  // If search looks like an address (starts with a number), filter permits
-  // by address and return those builders — showing only matching projects.
-  const isAddressSearch = q && /^\d/.test(q);
-
-  let filtered = allPermits.filter(p => {
+  const q       = search ? search.toLowerCase().trim() : '';
+  const isAddr  = q && /^\d/.test(q);
+  const filtered = allPermits.filter(p => {
+    if (p._excluded) return false;
     if (area   && p.area          !== area)   return false;
-    if (zip    && p.zip5          !== zip)    return false;
+    if (zip    && String(p.zip5||'') !== zip) return false;
     if (status && p.statuscurrent !== status) return false;
-    if (isAddressSearch) {
-      return (p.originaladdress1 || '').toLowerCase().includes(q);
-    }
+    if (isAddr  && !(p.originaladdress1||'').toLowerCase().includes(q)) return false;
+    if (!isAddr && q && !(p.contractorcompanyname||'').toLowerCase().includes(q)) return false;
     return true;
   });
-
-  let builders = aggregateBuilders(filtered);
-
-  // Builder name search (only when not an address search)
-  if (q && !isAddressSearch) {
-    builders = builders.filter(b => b.name.toLowerCase().includes(q));
-  }
-
-  return builders;
+  return aggregateBuilders(filtered);
 }
 
-export async function loadDashboardData({ onProgress, signal } = {}) {
+// ---------------------------------------------------------------------------
+// Load functions
+// ---------------------------------------------------------------------------
+
+export async function loadDashboardData({ onProgress, signal, mode = 'new' } = {}) {
   onProgress?.({ stage:'permits', message:'Connecting to ArcGIS…', pct:0 });
-  const rawPermits = await fetchAllPermits({ onProgress, signal });
-  onProgress?.({ stage:'permits', message:`Tagging ${rawPermits.length} permits…`, pct:0.95 });
-  const permits = rawPermits.map(tagPermit);
+  const raw     = await fetchAllPermits({ onProgress, signal, mode });
+  const permits = raw.map(tagPermit).filter(p => !p._excluded);
   onProgress?.({ stage:'aggregating', message:'Aggregating builders…', pct:null });
   const builders = aggregateBuilders(permits);
   onProgress?.({ stage:'done', message:`Ready — ${builders.length} builders, ${permits.length} permits.`, pct:1 });
   return { builders, permits };
 }
 
-/**
- * loadFromCache()
- *
- * Loads pre-fetched permit data from data/permits.json instead of
- * hitting the ArcGIS API live. Returns the same { builders, permits }
- * shape as loadDashboardData().
- *
- * Falls back to loadDashboardData() if the cache file doesn't exist
- * or is stale (older than 48 hours).
- *
- * @param {object} opts
- * @param {Function} [opts.onProgress]
- * @returns {Promise<{builders, permits, fromCache: boolean, cachedAt: string|null}>}
- */
-export async function loadFromCacheOrLive({ onProgress, signal } = {}) {
+export async function loadFromCacheOrLive({ onProgress, signal, mode = 'new' } = {}) {
   onProgress?.({ stage:'permits', message:'Loading permit data…', pct:0 });
+  const cacheFile = mode === 'reno' ? './data/permits-reno.json' : './data/permits-new.json';
 
-  // Try the cache first
   try {
-    const res = await fetch('./data/permits.json');
+    const res = await fetch(cacheFile);
     if (res.ok) {
-      const json = await res.json();
-
-      // Check freshness — fall through to live if cache is older than 48h
-      const cachedAt  = new Date(json.fetchedAt);
-      const ageHours  = (Date.now() - cachedAt.getTime()) / 3_600_000;
-
+      const json     = await res.json();
+      const cachedAt = new Date(json.fetchedAt);
+      const ageHours = (Date.now() - cachedAt.getTime()) / 3_600_000;
       if (ageHours < 48 && Array.isArray(json.permits) && json.permits.length > 0) {
         onProgress?.({ stage:'permits', message:`Loaded ${json.permits.length.toLocaleString()} permits from cache…`, pct:0.9 });
-        const permits  = json.permits.map(tagPermit);
-        onProgress?.({ stage:'aggregating', message:'Aggregating builders…', pct:null });
+        const permits  = json.permits.map(tagPermit).filter(p => !p._excluded);
         const builders = aggregateBuilders(permits);
         onProgress?.({ stage:'done', message:`Ready — ${builders.length} builders, ${permits.length} permits.`, pct:1 });
-        return { builders, permits, fromCache: true, cachedAt: json.fetchedAt };
+        return { builders, permits, fromCache: true, cachedAt: json.fetchedAt, mode };
       }
     }
-  } catch {
-    // Cache unavailable — fall through to live fetch
-  }
+  } catch { /* fall through */ }
 
-  // Cache miss or stale — fetch live from ArcGIS
   onProgress?.({ stage:'permits', message:'Cache unavailable — connecting to ArcGIS…', pct:0 });
-  const { builders, permits } = await loadDashboardData({ onProgress, signal });
-  return { builders, permits, fromCache: false, cachedAt: null };
+  const { builders, permits } = await loadDashboardData({ onProgress, signal, mode });
+  return { builders, permits, fromCache: false, cachedAt: null, mode };
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }

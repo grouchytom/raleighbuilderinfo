@@ -12,7 +12,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 
 // ─── ArcGIS config ────────────────────────────────────────────────────────────
 const ARCGIS_BASE = 'https://services.arcgis.com/v400IkDOw1ad7Yad/arcgis/rest/services/Building_Permits/FeatureServer/0/query';
-const FIELDS = 'permitnum,applieddate,issueddate,recordupdatedate,workclassmapped,statuscurrent,statuscurrentmapped,constcompletedofficial,contractorcompanyname,contractoremail,contractorphone,estprojectcost,latitude_perm,longitude_perm,pin,parcelownername,address,workclass,permitclassmapped,reviewercomments,perm_comments,description';
+const FIELDS = '*';
 
 // ─── EnerGov config ───────────────────────────────────────────────────────────
 const ENERGOV_BASE = 'https://raleighnc-energovpub.tylerhost.net/apps/selfservice/api/energov';
@@ -64,28 +64,19 @@ const SUBRECORD_TYPES_INCLUDE = [
 // ─── ArcGIS fetch ─────────────────────────────────────────────────────────────
 async function fetchArcGIS(mode) {
   const isNew = mode === 'new';
-  const workclassWhere = isNew
-    ? "workclassmapped='New'"
-    : "workclassmapped='Existing'";
 
-  const RENO_EXCLUDED = [
-    'Demolish','NON-CONSTRUCTION INSPECTION','Change Of Use','Foundation Only',
-    'Specialty','Other','Other - Comm','Other - Resd','Mobile Home Original/Replacement',
-    'Manufactured Home Original','Manufactured Home Repairs','Manufactured Home Replacement',
-    'Mobile Home Original','Mobile Home Replacement','Swimming Pool - Commercial',
-  ];
+  // Match the exact WHERE clause pattern from the original working script
+  const where = isNew
+    ? "(workclassmapped = 'New') AND permitclassmapped = 'Residential' AND applieddate >= DATE '2020-01-01'"
+    : "(workclassmapped = 'Existing') AND permitclassmapped = 'Residential' AND applieddate >= DATE '2020-01-01'";
+
+  console.log(`  WHERE: ${where}`);
 
   let allFeatures = [];
   let offset = 0;
-  const pageSize = 1000;
+  const pageSize = 2000;
 
   while (true) {
-    let where = `permitclassmapped='Residential' AND ${workclassWhere}`;
-    if (!isNew) {
-      const excluded = RENO_EXCLUDED.map(w => `workclass<>'${w}'`).join(' AND ');
-      where += ` AND (${excluded})`;
-    }
-
     const params = new URLSearchParams({
       where,
       outFields: FIELDS,
@@ -95,7 +86,12 @@ async function fetchArcGIS(mode) {
     });
 
     const res = await fetch(`${ARCGIS_BASE}?${params}`);
+    if (!res.ok) throw new Error(`ArcGIS HTTP ${res.status} for mode=${mode}`);
     const data = await res.json();
+
+    if (data.error) {
+      throw new Error(`ArcGIS error: ${JSON.stringify(data.error)}`);
+    }
 
     if (!data.features || data.features.length === 0) break;
     allFeatures.push(...data.features.map(f => f.attributes));
